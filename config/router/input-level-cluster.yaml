@@ -1,0 +1,6 @@
+router_name: "input-kmeans-cluster"
+router_path: "InputLevelCluster"
+routing_strategy:
+  clustering_algorithm: "kmeans"
+  num_embeddings: 6
+  training_latents: null

@@ -1,0 +1,6 @@
+router_name: "input-hard-quantizer"
+router_path: "InputQuantizer"
+routing_strategy:
+  num_embeddings: 6
+  embedding_dim: 4096
+  quantize_fn: "hard"

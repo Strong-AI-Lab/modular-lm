@@ -1,0 +1,4 @@
+dataset_name: "eli5"
+dataset_path: "eli5"
+dataset_config:
+  split: "train_asks[:5000]"
