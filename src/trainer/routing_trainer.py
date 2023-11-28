@@ -9,20 +9,13 @@ class RoutingTrainer(Trainer):
         self.mutual_information_weight = mutual_information_weight
 
     def compute_loss(self, model, inputs, return_outputs=False):
-        labels = inputs.get("labels")
-
-        # forward pass
-        outputs = model(**inputs)
-        logits = outputs.get("logits")
-
-        # compute self-supervised loss
-        s_loss = nn.CrossEntropyLoss()(logits.view(-1, self.model.config.num_labels), labels.view(-1))
+        # compute outputs and self-supervised loss
+        s_loss, outputs = super().compute_loss(model, inputs, return_outputs=True)
 
         # compute routing loss
         if outputs.get("routing_loss") is None:
             r_loss = 0.0
         else:
-
             r_loss = outputs.get("routing_loss")
 
         # compute mutual information loss

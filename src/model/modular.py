@@ -30,6 +30,7 @@ class ModularModel(PreTrainedModel):
             self,
             input_ids: Optional[torch.Tensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
+            labels: Optional[torch.Tensor] = None,
     ):
         # Compute router outputs
         router_outputs = self.router(
@@ -62,11 +63,25 @@ class ModularModel(PreTrainedModel):
             domain_logits.append(domain_logits_i)
 
         domain_logits = torch.stack(domain_logits, dim=1)
-        domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1, 1)).to(domain_logits.device)
+        domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1, 1)).to(invariant_logits.device)
         aggregated_domain_logits = torch.sum(domain_weights * domain_logits, dim=1)
         logits = self.invariant_weight * invariant_logits + aggregated_domain_logits
         probas = torch.sigmoid(logits)
         # probas = torch.softmax(logits, dim=-1)
+
+        loss = None
+        if labels is not None: # from https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L1059
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = torch.nn.CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, self.config.vocab_size)
+            shift_labels = shift_labels.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
+
         return {
             "logits": logits,
             "probas": probas,
@@ -74,6 +89,7 @@ class ModularModel(PreTrainedModel):
             "mi_loss": mi_loss,
             "invariant_logits": invariant_logits,
             "domain_logits": aggregated_domain_logits,
+            "loss": loss,
         }
     
 

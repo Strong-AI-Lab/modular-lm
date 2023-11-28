@@ -70,7 +70,9 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_path"], **model_config["tokenizer_config"])
     tokenizer.pad_token = tokenizer.eos_token
     def tokenize_function(examples):
-        return tokenizer(" ".join(examples['answers']['text']), padding="max_length", truncation=True, max_length=model_config["max_length"])
+        tokenized = tokenizer(" ".join(examples['answers']['text']), padding="max_length", truncation=True, max_length=model_config["max_length"])
+        tokenized["labels"] = tokenized["input_ids"].copy()
+        return tokenized
 
 
     # Load evaluation dataset
