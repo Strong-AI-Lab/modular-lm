@@ -1,0 +1,14 @@
+model_name: "llama2-7b-8bits"
+model_path: "/data/shared/llama2/llama-2-7b-chat-weights/"
+max_length: 512
+model_config:
+  load_in_4bit: True # load_in_8bit does not work due to a bitsandbytes issue. see related topics: https://github.com/TimDettmers/bitsandbytes/issues/162, https://github.com/facebookresearch/llama/issues/423, https://github.com/huggingface/peft/issues/131, https://github.com/h2oai/h2ogpt/issues/962
+tokenizer_config:
+  add_eos_token: true
+kwargs:
+  nb_modules: 2 # Must be equal to "num_embeddings" in router config
+  invariant_weight: 1.0
+  hidden_dropout_prob: 0.1
+  mi_dim_reduction: 1024
+
+  

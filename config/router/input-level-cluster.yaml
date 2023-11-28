@@ -2,5 +2,5 @@ router_name: "input-kmeans-cluster"
 router_path: "InputLevelCluster"
 routing_strategy:
   clustering_algorithm: "kmeans"
-  num_embeddings: 6
+  num_embeddings: 2 # Must be equal to "nb_modules" in model config
   training_latents: null

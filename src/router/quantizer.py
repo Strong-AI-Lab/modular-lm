@@ -101,6 +101,7 @@ class InputQuantizer(InputLevelRouting):
 
     def compute_routing(self, latents: torch.Tensor) -> torch.Tensor:
         latents_shape = latents.shape
+        latents = latents.to(self.embedding.weight.device)
         flat_latents = latents.view(-1, self.D)  # [B x L x D] -> [BL x D]
 
         # Compute L2 distance between latents and embedding weights
