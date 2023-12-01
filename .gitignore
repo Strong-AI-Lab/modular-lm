@@ -2,5 +2,5 @@ env/
 cluster_results/
 __pycache__/
 nohup.out
-fine-tuning-outputs/
+fine-tuning-output/
 fine-tuning-saves/

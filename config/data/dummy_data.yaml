@@ -1,4 +1,5 @@
 dataset_name: "eli5"
 dataset_path: "eli5"
+huggingface: true
 dataset_config:
   split: "train_asks[:5000]"

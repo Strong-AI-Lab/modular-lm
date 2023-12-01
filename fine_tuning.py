@@ -7,9 +7,10 @@ import datetime
 from src.model.modular import ModularModel
 from src.router.loader import load_router
 from src.trainer.routing_trainer import RoutingTrainer
+from src.data.dataset import EvalsDataset
 
 from transformers import TrainingArguments, AutoModelForCausalLM, AutoTokenizer, PretrainedConfig
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 import evaluate
 from peft import get_peft_config, get_peft_model, prepare_model_for_int8_training
 
@@ -70,14 +71,21 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_path"], **model_config["tokenizer_config"])
     tokenizer.pad_token = tokenizer.eos_token
     def tokenize_function(examples):
-        tokenized = tokenizer(" ".join(examples['answers']['text']), padding="max_length", truncation=True, max_length=model_config["max_length"])
-        tokenized["labels"] = tokenized["input_ids"].copy()
+        tokenized = tokenizer(" ".join(examples['text']), padding="max_length", truncation=True, max_length=model_config["max_length"])
+        if "labels" in examples:
+            tokenized["labels"] = tokenizer(examples["labels"], padding="max_length", truncation=True, max_length=model_config["max_length"])["input_ids"]
+        else:
+            tokenized["labels"] = tokenized["input_ids"].copy()
         return tokenized
 
 
     # Load evaluation dataset
-    dataset = load_dataset(data_config["dataset_path"], **data_config["dataset_config"])
-    dataset = dataset.train_test_split(test_size=0.8, shuffle=True, seed=42)
+    if "huggingface" in data_config and data_config["huggingface"]:
+        dataset = load_dataset(data_config["dataset_path"], **data_config["dataset_config"])
+    elif "evals" in data_config and data_config["evals"]:
+        dataset = Dataset.from_generator(EvalsDataset(data_config["dataset_path"], **data_config["dataset_config"]).generator)
+        
+    dataset = dataset.train_test_split(test_size=0.2, shuffle=True, seed=42)
     train_dataset = dataset["train"]
     train_dataset = train_dataset.map(tokenize_function, batched=False)
     eval_dataset = dataset["test"]
