@@ -1,12 +1,14 @@
 
 import os
-from typing import Optional, Callable, Union, List
+from typing import Optional, Callable, Union, List, Tuple
+from dataclasses import dataclass
 
 from ..router.loader import load_router
 from ..loss.mi import batch_mutual_information_loss, mutual_random_reduce
 
 import torch
-from transformers import PreTrainedModel, PretrainedConfig, AutoModelForCausalLM, AutoConfig
+from transformers import PreTrainedModel, PretrainedConfig, AutoModelForCausalLM, AutoConfig, LlamaForCausalLM
+from transformers.utils import ModelOutput
 from peft import get_peft_config, get_peft_model, prepare_model_for_int8_training, PeftModel
 
 
@@ -59,10 +61,16 @@ class ModularConfig(PretrainedConfig):
         if router_path is None: # if router path and config are not provided, use base model path and config
             self.router_path = self.base_model_path
             self.router_config = self.base_model_config
+        else:
+            self.router_path = router_path
+            self.router_config = router_config
 
         if invariant_model_path is None:
             self.invariant_model_path = self.base_model_path
             self.invariant_model_config = self.base_model_config
+        else:
+            self.invariant_model_path = invariant_model_path
+            self.invariant_model_config = invariant_model_config
 
         self.domain_model_paths = []
         self.domain_model_configs = []
@@ -80,8 +88,22 @@ class ModularConfig(PretrainedConfig):
         super().__init__(**kwargs)
 
 
+@dataclass
+class ModularOutput(ModelOutput):
+    logits: Optional[torch.FloatTensor] = None
+    probas: Optional[torch.FloatTensor] = None
+    routing_loss: Optional[torch.FloatTensor] = None
+    mi_loss: Optional[torch.FloatTensor] = None
+    invariant_logits: Optional[torch.FloatTensor] = None
+    domain_logits: Optional[torch.FloatTensor] = None
+    loss: Optional[torch.FloatTensor] = None
+    past_key_values: Optional[Tuple[torch.FloatTensor]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
+    attentions: Optional[Tuple[torch.FloatTensor]] = None
 
-class ModularModel(PreTrainedModel):
+
+
+class ModularModel(LlamaForCausalLM):
 
     @classmethod
     def load_base_model(cls, model_path : str, model_config : dict, is_peft : bool = True, peft_config : Optional[dict] = None):
@@ -134,12 +156,30 @@ class ModularModel(PreTrainedModel):
             self,
             input_ids: Optional[torch.Tensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
-            labels: Optional[torch.Tensor] = None):
+            labels: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None
+            ):
+        # if past_key_values is not None, estimate the division per modules
+        if past_key_values is not None:
+            nb_keys_per_module = len(past_key_values) // (self.nb_modules + 2)
+
         # Compute router outputs
         router_outputs = self.router(
             input_ids,
             attention_mask=attention_mask,
             output_hidden_states=True,
+            return_dict=True,
+            position_ids=position_ids,
+            past_key_values=None if past_key_values is None else past_key_values[0:nb_keys_per_module],
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
         )
         domain_weights, routing_loss = self.compute_weights(router_outputs.hidden_states[-1])
         
@@ -147,23 +187,39 @@ class ModularModel(PreTrainedModel):
         invariant_outputs = self.invariant_model(
             input_ids,
             attention_mask=attention_mask,
+            return_dict=True,
+            position_ids=position_ids,
+            past_key_values=None if past_key_values is None else past_key_values[nb_keys_per_module:2*nb_keys_per_module],
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
         )
         invariant_logits = self.dropout(invariant_outputs.logits)
 
         # Compute domain outputs
+        domain_outputs = []
         domain_logits = []
         mi_loss = 0.0
         batch_size = input_ids.shape[0]
-        for domain_model_i in self.domain_models:
+        for i, domain_model_i in enumerate(self.domain_models):
             domain_outputs_i = domain_model_i(
                 input_ids,
                 attention_mask=attention_mask,
+                return_dict=True,
+                position_ids=position_ids,
+                past_key_values=None if past_key_values is None else past_key_values[(i+2)*nb_keys_per_module:(i+3)*nb_keys_per_module],
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
             )
             domain_logits_i = self.dropout(domain_outputs_i.logits)
             domain_logits_i = domain_logits_i.to(invariant_logits.device)
             reduced_invariant_logits, reduced_domain_logits_i = mutual_random_reduce(invariant_logits.view(batch_size, -1), domain_logits_i.view(batch_size, -1), self.mi_dim_reduction) # reduce the dimensionality of the logits to avoid memory overflow
             mi_loss += batch_mutual_information_loss(reduced_invariant_logits, reduced_domain_logits_i)
-            domain_logits.append(domain_logits_i)
+            domain_outputs.append(domain_outputs_i)
+            domain_logits.append(domain_logits_i) # TODO: check tensors are passed by value
 
         domain_logits = torch.stack(domain_logits, dim=1)
         domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1, 1)).to(invariant_logits.device)
@@ -185,16 +241,28 @@ class ModularModel(PreTrainedModel):
             shift_labels = shift_labels.to(shift_logits.device)
             loss = loss_fct(shift_logits, shift_labels)
 
-        return {
-            "logits": logits,
-            "probas": probas,
-            "routing_loss": routing_loss,
-            "mi_loss": mi_loss,
-            "invariant_logits": invariant_logits,
-            "domain_logits": aggregated_domain_logits,
-            "loss": loss,
-        }
-    
+        
+        output_past_key_values = None if not use_cache else router_outputs.past_key_values + invariant_outputs.past_key_values + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.past_key_values)
+        output_hidden_states = None if not output_hidden_states else router_outputs.hidden_states + invariant_outputs.hidden_states + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.hidden_states)
+        output_attentions = None if not output_attentions else router_outputs.attentions + invariant_outputs.attentions + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.attentions)
+
+        if not return_dict:
+                output = (logits, probas, routing_loss, mi_loss, invariant_logits, aggregated_domain_logits, output_past_key_values, output_hidden_states, output_attentions)
+                return (loss,) + output if loss is not None else output
+
+        return ModularOutput(
+            logits=logits,
+            probas=probas,
+            routing_loss=routing_loss,
+            mi_loss=mi_loss,
+            invariant_logits=invariant_logits,
+            domain_logits=aggregated_domain_logits,
+            loss=loss,
+            past_key_values=output_past_key_values,
+            hidden_states=output_hidden_states,
+            attentions=output_attentions,
+            )
+        
 
     def compute_weights(self, router_logits):
         """
