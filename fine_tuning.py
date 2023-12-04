@@ -4,9 +4,9 @@ import numpy as np
 import yaml
 import datetime
 
-from src.model.modular import ModularModel, ModularConfig
-from src.trainer.routing_trainer import RoutingTrainer
-from src.data.dataset import EvalsDataset
+from src.modular_lm.model.modular import ModularModel, ModularConfig
+from src.modular_lm.trainer.routing_trainer import RoutingTrainer
+from src.modular_lm.data.dataset import EvalsDataset
 
 from transformers import TrainingArguments, AutoModelForCausalLM, AutoTokenizer, PretrainedConfig
 from datasets import load_dataset, Dataset
