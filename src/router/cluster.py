@@ -55,6 +55,12 @@ class TokenLevelCluster(Cluster, TokenLevelRouting):
         labels = labels.view(latents.shape[0], latents.shape[1], self.num_embeddings) # [BL x K] -> [B x L x K]
 
         return labels , None
+
+    def save_strategy(self, path: str):
+        self.save_cluster(path)
+
+    def load_strategy(self, path: str):
+        self.clustering_algorithm = Cluster.load_cluster(path, self.num_embeddings).clustering_algorithm
     
 
 class DiffTokenLevelCluster(TokenLevelCluster):
@@ -81,6 +87,12 @@ class InputLevelCluster(Cluster, InputLevelRouting):
         labels = F.one_hot(torch.tensor(labels, device=latents.device), num_classes=self.num_embeddings).float() # non differentiable operation
 
         return labels , None
+
+    def save_strategy(self, path: str):
+        self.save_cluster(path)
+
+    def load_strategy(self, path: str):
+        self.clustering_algorithm = Cluster.load_cluster(path, self.num_embeddings).clustering_algorithm
     
 
 class DiffInputLevelCluster(InputLevelCluster):

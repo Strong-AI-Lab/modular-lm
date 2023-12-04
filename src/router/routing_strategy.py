@@ -10,6 +10,12 @@ class RoutingStrategy(torch.nn.Module):
     def compute_routing(self, latents: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError("Abstract method")
     
+    def save_strategy(self, path: str):
+        raise NotImplementedError("Abstract method")
+    
+    def load_strategy(self, path: str):
+        raise NotImplementedError("Abstract method")
+    
 
 class InputLevelRouting(RoutingStrategy):
     

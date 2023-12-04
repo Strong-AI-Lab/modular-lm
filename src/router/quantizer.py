@@ -73,6 +73,12 @@ class TokenQuantizer(TokenLevelRouting):
         vq_loss = commitment_loss * self.beta + embedding_loss
 
         return encoding_one_hot.view((latents_shape[0], latents_shape[1], self.K)), vq_loss
+    
+    def save_strategy(self, path: str):
+        torch.save(self.embedding.weight.data, path + "/embeddings.pt")
+
+    def load_strategy(self, path: str):
+        self.embedding.weight.data = torch.load(path + "/embeddings.pt")
 
 
 
@@ -122,4 +128,10 @@ class InputQuantizer(InputLevelRouting):
     
     def _gumbel_quantize(self, distances: torch.Tensor) -> torch.Tensor:
         return F.gumbel_softmax(distances, tau=1.0, hard=True), None
+    
+    def save_strategy(self, path: str):
+        torch.save(self.embedding.weight.data, path + "/embeddings.pt")
+
+    def load_strategy(self, path: str):
+        self.embedding.weight.data = torch.load(path + "/embeddings.pt")
     

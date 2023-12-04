@@ -4,15 +4,13 @@ import numpy as np
 import yaml
 import datetime
 
-from src.model.modular import ModularModel
-from src.router.loader import load_router
+from src.model.modular import ModularModel, ModularConfig
 from src.trainer.routing_trainer import RoutingTrainer
 from src.data.dataset import EvalsDataset
 
 from transformers import TrainingArguments, AutoModelForCausalLM, AutoTokenizer, PretrainedConfig
 from datasets import load_dataset, Dataset
 import evaluate
-from peft import get_peft_config, get_peft_model, prepare_model_for_int8_training
 
 
 
@@ -55,19 +53,17 @@ def main():
 
 
     # Load model
-    def load_base_model():
-        base_model = AutoModelForCausalLM.from_pretrained(model_config["model_path"], **model_config["model_config"])
-        peft_config = get_peft_config(trainer_config["peft"])
-        base_model = prepare_model_for_int8_training(base_model) # Add this for using int8
-        base_model = get_peft_model(base_model, peft_config) # Add this for using PEFT
-        return base_model
-
-    model = ModularModel(
-        base_model_func=load_base_model,
-        base_model_config=PretrainedConfig.from_pretrained(model_config["model_path"], model_config["model_config"]),
-        routing_strategy=load_router(router_config["router_path"], router_config["routing_strategy"]),
-        **model_config["kwargs"]
-    )
+    config = ModularConfig(
+                 base_model_path = model_config["model_path"], 
+                 base_model_config = model_config["model_config"], 
+                 routing_strategy_name = router_config["router_path"], 
+                 routing_strategy_config = router_config["routing_strategy"],
+                 routing_strategy_save = None if "save_path" not in router_config else router_config["save_path"],
+                 is_peft = "peft" in trainer_config, 
+                 peft_config = trainer_config["peft"],
+                 **model_config["kwargs"])
+    model = ModularModel(config=config)
+    
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_path"], **model_config["tokenizer_config"])
     tokenizer.pad_token = tokenizer.eos_token
     def tokenize_function(examples):
@@ -110,6 +106,7 @@ def main():
     save_path = f"fine-tuning-saves/fine-tuned-{model_config['model_name']}-{router_config['router_name']}-{data_config['dataset_name']}-{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     trainer.save_model(save_path)
     model.save_pretrained(save_path)
+    model.config.save_pretrained(save_path)
     tokenizer.save_pretrained(save_path)
 
 
