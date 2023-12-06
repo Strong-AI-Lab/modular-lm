@@ -12,17 +12,28 @@ class RoutingTrainer(Trainer):
         # compute outputs and self-supervised loss
         s_loss, outputs = super().compute_loss(model, inputs, return_outputs=True)
 
-        # compute routing loss
-        if outputs.get("routing_loss") is None:
-            r_loss = 0.0
+        if isinstance(outputs, dict):
+            # compute routing loss
+            if outputs.get("routing_loss") is not None:
+                r_loss = outputs.get("routing_loss")
+            else:
+                r_loss = 0.0
+            # compute mutual information loss
+            if outputs.get("mi_loss") is not None:
+                mi_loss = outputs.get("mi_loss")
+            else:
+                mi_loss = 0.0
         else:
-            r_loss = outputs.get("routing_loss")
-
-        # compute mutual information loss
-        if outputs.get("mi_loss") is None:
-            mi_loss = 0.0
-        else:
-             mi_loss = outputs.get("mi_loss")
+            # compute routing loss
+            if len(outputs) >= 4 and outputs[3] is not None:
+                r_loss = outputs[3]
+            else:
+                r_loss = 0.0
+            # compute mutual information loss
+            if len(outputs) >= 5 and outputs[4] is not None:
+                mi_loss = outputs[4]
+            else:
+                mi_loss = 0.0
 
         loss = s_loss + self.routing_weight * r_loss + self.mutual_information_weight * mi_loss
 
