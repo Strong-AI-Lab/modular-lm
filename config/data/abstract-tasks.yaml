@@ -1,0 +1,14 @@
+
+dataset_name: "ALL_ABSTRACT_TASKS"
+dataset_path: 
+   - "../Logical-and-abstract-reasoning/data/ACRE/text/IID/test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/ACRE/symbolic/IID/test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/Big-bench/Functions/symbolic/task_4ex.jsonl"
+   - "../Logical-and-abstract-reasoning/data/Evals/Strings/samples.jsonl"
+   - "../Logical-and-abstract-reasoning/data/Evals/Patterns/samples.jsonl"
+   - "../Logical-and-abstract-reasoning/data/PVR/symbolic/IID/train_complexity0_4ex.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/symbolic/center_single_test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/text/center_single_test.jsonl"
+evals: true
+dataset_config:
+  max_size: 100

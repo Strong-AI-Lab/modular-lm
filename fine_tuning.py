@@ -6,7 +6,7 @@ import datetime
 
 from src.modular_lm.model.modular import ModularModel, ModularConfig
 from src.modular_lm.trainer.routing_trainer import RoutingTrainer
-from src.modular_lm.data.dataset import EvalsDataset
+from src.modular_lm.data.dataset import ProxyDataset
 
 from transformers import TrainingArguments, AutoModelForCausalLM, AutoTokenizer, PretrainedConfig
 from datasets import load_dataset, Dataset
@@ -53,7 +53,8 @@ def main():
 
 
     # Load model
-    config = ModularConfig(
+    config = ModularConfig.from_pretrained(
+                 "config/model/modular_pretrained/config.json",
                  base_model_path = model_config["model_path"], 
                  base_model_config = model_config["model_config"], 
                  routing_strategy_name = router_config["router_path"], 
@@ -79,7 +80,7 @@ def main():
     if "huggingface" in data_config and data_config["huggingface"]:
         dataset = load_dataset(data_config["dataset_path"], **data_config["dataset_config"])
     elif "evals" in data_config and data_config["evals"]:
-        dataset = Dataset.from_generator(EvalsDataset(data_config["dataset_path"], **data_config["dataset_config"]).generator)
+        dataset = Dataset.from_generator(ProxyDataset(data_config["dataset_path"], **data_config["dataset_config"]).generator)
         
     dataset = dataset.train_test_split(test_size=0.2, shuffle=True, seed=42)
     train_dataset = dataset["train"]
