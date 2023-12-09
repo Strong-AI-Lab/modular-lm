@@ -96,6 +96,7 @@ class ModularOutput(ModelOutput):
     mi_loss: Optional[torch.FloatTensor] = None
     invariant_logits: Optional[torch.FloatTensor] = None
     domain_logits: Optional[torch.FloatTensor] = None
+    domain_weights: Optional[torch.FloatTensor] = None
     loss: Optional[torch.FloatTensor] = None
     past_key_values: Optional[Tuple[torch.FloatTensor]] = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
@@ -247,7 +248,7 @@ class ModularModel(LlamaForCausalLM):
         output_attentions = None if not output_attentions else router_outputs.attentions + invariant_outputs.attentions + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.attentions)
 
         if not return_dict:
-                output = (logits, probas, routing_loss, mi_loss, invariant_logits, aggregated_domain_logits, output_past_key_values, output_hidden_states, output_attentions)
+                output = (logits, probas, routing_loss, mi_loss, invariant_logits, aggregated_domain_logits, domain_weights, output_past_key_values, output_hidden_states, output_attentions)
                 return (loss,) + output if loss is not None else output
 
         return ModularOutput(
@@ -257,6 +258,7 @@ class ModularModel(LlamaForCausalLM):
             mi_loss=mi_loss,
             invariant_logits=invariant_logits,
             domain_logits=aggregated_domain_logits,
+            domain_weights=domain_weights,
             loss=loss,
             past_key_values=output_past_key_values,
             hidden_states=output_hidden_states,
