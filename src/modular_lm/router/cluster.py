@@ -1,4 +1,5 @@
 
+import os
 from typing import Union, Optional
 
 from .routing_strategy import TokenLevelRouting, InputLevelRouting
@@ -49,18 +50,18 @@ class TokenLevelCluster(Cluster, TokenLevelRouting):
 
     def compute_routing(self, latents: torch.Tensor) -> torch.Tensor:
         latents = latents.view(-1, latents.shape[-1]) # [B x L x D] -> [BL x D]
-        data = latents.detach().numpy() # non differentiable operation
+        data = latents.detach().cpu().numpy() # non differentiable operation
         labels = self.clustering_algorithm.predict(data)
-        labels = F.one_hot(torch.tensor(labels, device=latents.device), num_classes=self.num_embeddings).float() # non differentiable operation
+        labels = F.one_hot(torch.tensor(labels, device=latents.device, dtype=torch.int64), num_classes=self.num_embeddings).float() # non differentiable operation
         labels = labels.view(latents.shape[0], latents.shape[1], self.num_embeddings) # [BL x K] -> [B x L x K]
 
         return labels , None
 
     def save_strategy(self, path: str):
-        self.save_cluster(path)
+        self.save_cluster(os.path.join(path, "clusters.sav"))
 
     def load_strategy(self, path: str):
-        self.clustering_algorithm = Cluster.load_cluster(path, self.num_embeddings).clustering_algorithm
+        self.clustering_algorithm = Cluster.load_cluster(os.path.join(path, "clusters.sav"), self.num_embeddings).clustering_algorithm
     
 
 class DiffTokenLevelCluster(TokenLevelCluster):
@@ -82,17 +83,17 @@ class InputLevelCluster(Cluster, InputLevelRouting):
         
     def compute_routing(self, latents: torch.Tensor) -> torch.Tensor:
         latents = latents.sum(dim=1) # [B x L x D] -> [B x D]
-        data = latents.detach().numpy() # non differentiable operation
+        data = latents.detach().cpu().numpy() # non differentiable operation
         labels = self.clustering_algorithm.predict(data)
-        labels = F.one_hot(torch.tensor(labels, device=latents.device), num_classes=self.num_embeddings).float() # non differentiable operation
+        labels = F.one_hot(torch.tensor(labels, device=latents.device, dtype=torch.int64), num_classes=self.num_embeddings).float() # non differentiable operation
 
         return labels , None
 
     def save_strategy(self, path: str):
-        self.save_cluster(path)
+        self.save_cluster(os.path.join(path, "clusters.sav"))
 
     def load_strategy(self, path: str):
-        self.clustering_algorithm = Cluster.load_cluster(path, self.num_embeddings).clustering_algorithm
+        self.clustering_algorithm = Cluster.load_cluster(os.path.join(path, "clusters.sav"), self.num_embeddings).clustering_algorithm
     
 
 class DiffInputLevelCluster(InputLevelCluster):

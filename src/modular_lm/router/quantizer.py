@@ -1,4 +1,6 @@
 
+import os
+
 from .routing_strategy import TokenLevelRouting, InputLevelRouting
 
 import torch
@@ -75,10 +77,10 @@ class TokenQuantizer(TokenLevelRouting):
         return encoding_one_hot.view((latents_shape[0], latents_shape[1], self.K)), vq_loss
     
     def save_strategy(self, path: str):
-        torch.save(self.embedding.weight.data, path + "/embeddings.pt")
+        torch.save(self.embedding.weight.data, os.path.join(path, "embeddings.pt"))
 
     def load_strategy(self, path: str):
-        self.embedding.weight.data = torch.load(path + "/embeddings.pt")
+        self.embedding.weight.data = torch.load(os.path.join(path, "embeddings.pt"))
 
 
 
@@ -130,8 +132,8 @@ class InputQuantizer(InputLevelRouting):
         return F.gumbel_softmax(distances, tau=1.0, hard=True), None
     
     def save_strategy(self, path: str):
-        torch.save(self.embedding.weight.data, path + "/embeddings.pt")
+        torch.save(self.embedding.weight.data, os.path.join(path, "embeddings.pt"))
 
     def load_strategy(self, path: str):
-        self.embedding.weight.data = torch.load(path + "/embeddings.pt")
+        self.embedding.weight.data = torch.load(os.path.join(path, "embeddings.pt"))
     
