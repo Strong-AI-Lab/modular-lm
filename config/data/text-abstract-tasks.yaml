@@ -1,0 +1,8 @@
+
+dataset_name: "TEXT_ABSTRACT_TASKS"
+dataset_path: 
+   - "../Logical-and-abstract-reasoning/data/ACRE/text/IID/test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/text/center_single_test.jsonl"
+evals: true
+dataset_config:
+  max_size: 100
