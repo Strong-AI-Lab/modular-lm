@@ -16,24 +16,18 @@ class ModularConfig(PretrainedConfig):
     model_type = "modular"
     keys_to_ignore_at_inference = ["past_key_values"]
 
-    def __init__(
+    def _log_warnings(
                 self,
-                 base_model_path : Optional[str] = None, 
-                 base_model_config : Optional[dict] = None, 
-                 router_path : Optional[str] = None, 
-                 router_config : Optional[dict] = None, 
-                 invariant_model_path : Optional[str] = None, 
-                 invariant_model_config : Optional[dict] = None,  
-                 routing_strategy_name : Optional[str] = None,
-                 routing_strategy_config : Optional[dict] = None,
-                 routing_strategy_save : Optional[str] = None,
-                 nb_modules : int = 4, 
-                 invariant_weight : float = 1.0, 
-                 hidden_dropout_prob : float = 0.1, 
-                 mi_dim_reduction : int = 1024, 
-                 is_peft : Union[bool,str,List[str]] = True, 
-                 peft_config : Optional[dict] = None,
-                **kwargs):
+                base_model_path : Optional[str] = None, 
+                base_model_config : Optional[dict] = None, 
+                router_path : Optional[str] = None, 
+                router_config : Optional[dict] = None, 
+                invariant_model_path : Optional[str] = None, 
+                invariant_model_config : Optional[dict] = None,  
+                routing_strategy_name : Optional[str] = None,
+                routing_strategy_config : Optional[dict] = None,
+                is_peft : Union[bool,str,List[str]] = True, 
+                peft_config : Optional[dict] = None):
         
         if base_model_path is not None and base_model_config is None:
             print("Warning! `base_model_config` must be provided if `base_model_path` is given.")
@@ -44,19 +38,15 @@ class ModularConfig(PretrainedConfig):
         if routing_strategy_name is None or routing_strategy_config is None:
             print("Warning! `routing_strategy_name` and `routing_strategy_config` must be provided.")
         if is_peft and peft_config is None:
-            print("Warning! `peft_config` must be provided if `is_peft` is True.")
+            print("Warning! `peft_config` must be provided if `is_peft` is True.") 
 
-        self.nb_modules = nb_modules
-        self.invariant_weight = invariant_weight
-        self.hidden_dropout_prob = hidden_dropout_prob
-        self.mi_dim_reduction = mi_dim_reduction
-        self.is_peft = is_peft
-        self.peft_config = peft_config
-        self.base_model_path = base_model_path
-        self.base_model_config = base_model_config
-        self.routing_strategy_name = routing_strategy_name
-        self.routing_strategy_config = routing_strategy_config
-        self.routing_strategy_save = routing_strategy_save
+    def _update_modules_from_base(
+                 self,
+                 router_path : Optional[str] = None, 
+                 router_config : Optional[dict] = None, 
+                 invariant_model_path : Optional[str] = None, 
+                 invariant_model_config : Optional[dict] = None,  
+                **kwargs):       
 
         if router_path is None: # if router path and config are not provided, use base model path and config
             self.router_path = self.base_model_path
@@ -85,7 +75,52 @@ class ModularConfig(PretrainedConfig):
                 self.domain_model_paths.append(self.base_model_path)
                 self.domain_model_configs.append(self.base_model_config)
         
+
+    def __init__(
+                 self,
+                 base_model_path : Optional[str] = None, 
+                 base_model_config : Optional[dict] = None, 
+                 router_path : Optional[str] = None, 
+                 router_config : Optional[dict] = None, 
+                 invariant_model_path : Optional[str] = None, 
+                 invariant_model_config : Optional[dict] = None,  
+                 routing_strategy_name : Optional[str] = None,
+                 routing_strategy_config : Optional[dict] = None,
+                 routing_strategy_save : Optional[str] = None,
+                 nb_modules : int = 4, 
+                 invariant_weight : float = 1.0, 
+                 hidden_dropout_prob : float = 0.1, 
+                 mi_dim_reduction : int = 1024, 
+                 is_peft : Union[bool,str,List[str]] = True, 
+                 peft_config : Optional[dict] = None,
+                **kwargs):
         super().__init__(**kwargs)
+
+        self.nb_modules = nb_modules
+        self.invariant_weight = invariant_weight
+        self.hidden_dropout_prob = hidden_dropout_prob
+        self.mi_dim_reduction = mi_dim_reduction
+        self.is_peft = is_peft
+        self.peft_config = peft_config
+        self.base_model_path = base_model_path
+        self.base_model_config = base_model_config
+        self.routing_strategy_name = routing_strategy_name
+        self.routing_strategy_config = routing_strategy_config
+        self.routing_strategy_save = routing_strategy_save
+
+        self._log_warnings(base_model_path, base_model_config, router_path, router_config, invariant_model_path, invariant_model_config, routing_strategy_name, routing_strategy_config, is_peft, peft_config)
+        self._update_modules_from_base(router_path, router_config, invariant_model_path, invariant_model_config, **kwargs)
+
+    
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+        **kwargs):
+        config = super(ModularConfig, cls).from_pretrained(pretrained_model_name_or_path, **kwargs)
+        config._update_modules_from_base(**kwargs)
+        
+        return config
 
 
 @dataclass
