@@ -3,11 +3,13 @@ import argparse
 import numpy as np
 import yaml
 import datetime
+import tqdm
 
 from src.modular_lm.model.modular import ModularModel, ModularConfig
 from src.modular_lm.trainer.routing_trainer import RoutingTrainer
 from src.modular_lm.data.dataset import ProxyDataset
 
+import torch
 from transformers import TrainingArguments, AutoModelForCausalLM, AutoTokenizer, PretrainedConfig
 from datasets import load_dataset, Dataset
 import evaluate
@@ -87,6 +89,31 @@ def main():
     train_dataset = train_dataset.map(tokenize_function, batched=False)
     eval_dataset = dataset["test"]
     eval_dataset = eval_dataset.map(tokenize_function, batched=False)
+
+
+    # If using clustering router, learn clusters first
+    if router_config["router_path"].endswith("LevelCluster") and "pretrain_cluster" in router_config and router_config["pretrain_cluster"]:
+        embeddings = []
+        batch = []
+        for i in tqdm.trange(len(dataset["train"])):
+            text = " ".join(dataset["train"][i]['text'])
+            batch.append(text)
+
+            if len(batch) == trainer_config["training_arguments"]["per_device_train_batch_size"] or i == len(dataset) - 1:
+                input_ids = tokenizer(batch, return_tensors='pt', padding="max_length", truncation=True, max_length=model_config["max_length"])
+                batch = []
+
+                outputs = model.router(**input_ids, output_hidden_states=True)
+                outputs = outputs.hidden_states[-1].detach()
+                outputs = outputs.sum(dim=1).numpy()
+
+                if np.isnan(outputs).any():
+                    print("NaN encountered in the embeddings. Skipping this batch. This can happen when the batch size is too large.")
+                else:
+                    embeddings.extend(outputs)
+        
+        embeddings = torch.tensor(np.array(embeddings))
+        model.routing_strategy.fit_cluster(embeddings)
 
 
     # Train model
