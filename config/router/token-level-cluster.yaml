@@ -1,5 +1,5 @@
-router_name: "input-kmeans-cluster"
-router_path: "InputLevelCluster"
+router_name: "token-kmeans-cluster"
+router_path: "TokenLevelCluster"
 pretrain_cluster: true
 routing_strategy:
   clustering_algorithm: "K-Means"

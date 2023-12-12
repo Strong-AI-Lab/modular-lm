@@ -3,4 +3,4 @@ dataset_name: "ACRE"
 dataset_path: "../Logical-and-abstract-reasoning/data/ACRE/text/IID/test.jsonl"
 evals: true
 dataset_config:
-  max_size: 100
+  max_size: 1000

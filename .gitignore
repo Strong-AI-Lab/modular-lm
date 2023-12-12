@@ -4,4 +4,4 @@ __pycache__/
 nohup.out
 fine-tuning-output/
 fine-tuning-saves/
-modular_lm.egg-info
+modular_lm.egg-info/

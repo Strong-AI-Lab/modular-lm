@@ -29,23 +29,7 @@
       "load_in_4bit": true
     },
     "base_model_path": "/data/shared/llama2/llama-2-7b-chat-weights/",
-    "domain_model_configs": [
-      {
-        "load_in_4bit": true
-      },
-      {
-        "load_in_4bit": true
-      }
-    ],
-    "domain_model_paths": [
-      "/data/shared/llama2/llama-2-7b-chat-weights/",
-      "/data/shared/llama2/llama-2-7b-chat-weights/"
-    ],
     "hidden_dropout_prob": 0.1,
-    "invariant_model_config": {
-      "load_in_4bit": true
-    },
-    "invariant_model_path": "/data/shared/llama2/llama-2-7b-chat-weights/",
     "invariant_weight": 1.0,
     "is_peft": true,
     "mi_dim_reduction": 1024,
@@ -64,10 +48,6 @@
       ],
       "task_type": "CAUSAL_LM"
     },
-    "router_config": {
-      "load_in_4bit": true
-    },
-    "router_path": "/data/shared/llama2/llama-2-7b-chat-weights/",
     "routing_strategy_config": {
       "embedding_dim": 4096,
       "num_embeddings": 2,
