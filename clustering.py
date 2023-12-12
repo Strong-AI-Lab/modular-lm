@@ -1,16 +1,18 @@
 
 import numpy as np
-import pandas as pd
 import argparse
 import yaml
 import tqdm
 import os
 import datetime
-
 import matplotlib.pyplot as plt
 
+from src.modular_lm.router.loader import load_router
+from src.modular_lm.data.dataset import ProxyDataset
+
+import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, DataCollatorForLanguageModeling
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 
 from sklearn.cluster import BisectingKMeans, KMeans
 from sklearn.manifold import MDS
@@ -30,7 +32,8 @@ def main():
     parser.add_argument("model_config")
     parser.add_argument("dataset_config")
     parser.add_argument('--batch_size', type=int, default=8, help='Batch size for the model.')
-    parser.add_argument('--saved_clusters_path', type=str, default=None, help='Path to the saved clusters. If specified, the embeddings will not be recomputed.')
+    parser.add_argument('--router_config', type=str, default=None, help='Path to the router config file. If specified, the clusters will not be recomputed.')
+    parser.add_argument('--saved_clusters_path', type=str, default=None, help='Path to the saved clusters. If specified, the clusters will not be recomputed.')
     args = parser.parse_args()
     
     # Load model config file
@@ -43,8 +46,13 @@ def main():
 
 
     # Load the dataset
-    dataset = load_dataset(data_config["dataset_path"], **data_config["dataset_config"])
-    dataset = dataset.train_test_split(test_size=0.8, shuffle=True, seed=42)
+    # Load evaluation dataset
+    if "huggingface" in data_config and data_config["huggingface"]:
+        dataset = load_dataset(data_config["dataset_path"], **data_config["dataset_config"])
+    elif "evals" in data_config and data_config["evals"]:
+        dataset = Dataset.from_generator(ProxyDataset(data_config["dataset_path"], **data_config["dataset_config"]).generator)
+        
+    dataset = dataset.train_test_split(test_size=0.2, shuffle=True, seed=42)
     dataset = dataset["train"]
 
 
@@ -60,17 +68,16 @@ def main():
     embeddings = []
     batch = []
     for i in tqdm.trange(len(dataset)):
-        text = " ".join(dataset[i]['answers']['text'])
-        text = text[:1024]
-        batch.append(text)
+        batch.append(dataset[i]['text'])
 
-        if len(batch) == args.batch_size or i == len(dataset) - 1:
-            input_ids = tokenizer(batch, return_tensors='pt', padding=True)
+        if len(batch) == args.batch_size:
+            input_ids = tokenizer(batch, return_tensors='pt', padding="max_length", truncation=True, max_length=model_config["max_length"])
             batch = []
 
             outputs = model(**input_ids, output_hidden_states=True)
             outputs = outputs.hidden_states[-1].detach()
-            outputs = outputs.sum(dim=1).numpy()
+            # outputs = outputs.sum(dim=1).numpy()
+            outputs = outputs.numpy()
 
             if np.isnan(outputs).any():
                 print("NaN encountered in the embeddings. Skipping this batch. This can happen when the batch size is too large.")
@@ -81,33 +88,69 @@ def main():
 
 
     # Run the sklearn k-means algorithm on the embeddings
-    n_mds = 2
-    cluster_lists = [4, 8, 16]
+    if args.router_config is not None: # saved clusters are from a routing strategy: /!\ `args.saved_clusters_path` should usually be provided
 
-    project = MDS(n_components=n_mds)
-    projection = project.fit_transform(embeddings)
+        # Load model config file
+        with open(args.router_config, "r") as router_config_file:
+            router_config = yaml.safe_load(router_config_file)
 
-    fig, axs = plt.subplots(
-        2 * len(CLUSTERING_ALGORITHMS), len(cluster_lists), figsize=(24, 20)
-    )
-    axs = axs.T
-    algos = []
-    for k, data in enumerate([projection, embeddings]):
-        for i, (algorithm_name, Algorithm) in enumerate(CLUSTERING_ALGORITHMS.items()):
-            for j, n_clusters in enumerate(cluster_lists):
-                        if args.saved_clusters_path is None:
-                            algo = Algorithm(n_clusters=n_clusters, n_init=3)
-                            algo.fit(data)
-                            algos.append((algo, algorithm_name, n_clusters, n_mds if k == 0 else 0))
-                            labels = algo.labels_
-                        else:
-                            algo = joblib.load(f"{args.saved_clusters_path}/{algorithm_name}_{n_clusters}_mds={n_mds if k == 0 else 0}.sav")
-                            labels = algo.predict(data)
+        algo = load_router(router_config['router_path'], router_config['routing_strategy'], args.saved_clusters_path)
 
-                        centers = algo.cluster_centers_
-                        axs[j, i + k * len(CLUSTERING_ALGORITHMS)].scatter(projection[:, 0], projection[:, 1], s=10, c=labels)
-                        axs[j, i + k * len(CLUSTERING_ALGORITHMS)].scatter(centers[:, 0], centers[:, 1], c="r", s=20)
-                        axs[j, i + k * len(CLUSTERING_ALGORITHMS)].set_title(f"{algorithm_name} : {n_clusters} clusters {'(MDS={})'.format(n_mds) if k == 0 else ''}")
+        if router_config['router_name'] in ["input-kmeans-cluster", "token-kmeans-cluster"]: # save from sklearn clustering algorithm
+            algo.clustering_algorithm.cluster_centers_ = algo.clustering_algorithm.cluster_centers_.astype(np.float64)
+            labels, _ = algo(torch.as_tensor(embeddings,dtype=torch.float64))
+            labels = labels.argmax(-1).detach().cpu().numpy()
+            centers = algo.clustering_algorithm.cluster_centers_
+
+        elif router_config['router_name'] in ["input-hard-quantizer", "token-hard-quantizer", "input-soft-quantizer", "token-soft-quantizer"]: # save from torch routing model
+            labels, _ = algo(torch.as_tensor(embeddings, dtype=torch.float32))
+            print(labels)
+            labels = labels.argmax(-1).detach().cpu().numpy()
+            centers = algo.embedding.weight.detach().cpu().numpy()
+
+        project = MDS(n_components=2)
+        projection = project.fit_transform(embeddings.sum(axis=1))
+        centers = project.fit_transform(np.concatenate((centers, embeddings.sum(axis=1))))[-len(centers):] # /!\ this is an approximation of the position of the centers in the projected data space. there are no transform method for MDS. for more information, see: https://github.com/scikit-learn/scikit-learn/pull/16088 https://github.com/scikit-learn/scikit-learn/issues/15808
+
+        # create single plot figure
+        fig, axs = plt.subplots(1, 1, figsize=(9, 8))
+        axs.scatter(projection[:, 0], projection[:, 1], s=10, c=labels)
+        axs.scatter(centers[:, 0], centers[:, 1], c="r", s=20)
+        axs.set_title(f"{router_config['router_name']} : {router_config['routing_strategy']['num_embeddings']} clusters")
+
+    else: # no saves or custom save from previous clustering.py run
+        embeddings = embeddings.sum(axis=1)
+
+        n_mds = 2
+        cluster_lists = [4, 8, 16]
+
+        project = MDS(n_components=n_mds)
+        projection = project.fit_transform(embeddings)
+
+        fig, axs = plt.subplots(
+            2 * len(CLUSTERING_ALGORITHMS), len(cluster_lists), figsize=(24, 20)
+        )
+        axs = axs.T
+        algos = []
+        for k, data in enumerate([projection, embeddings]):
+            for i, (algorithm_name, Algorithm) in enumerate(CLUSTERING_ALGORITHMS.items()):
+                for j, n_clusters in enumerate(cluster_lists):
+                            if args.saved_clusters_path is None:
+                                algo = Algorithm(n_clusters=n_clusters, n_init=3)
+                                algo.fit(data)
+                                algos.append((algo, algorithm_name, n_clusters, n_mds if k == 0 else 0))
+                                labels = algo.labels_
+                            else:
+                                algo = joblib.load(os.path.join(args.saved_clusters_path, f"{algorithm_name}_{n_clusters}_mds={n_mds if k == 0 else 0}.sav"))
+                                labels = algo.predict(data)
+
+                            centers = algo.cluster_centers_
+                            if data is embeddings:
+                                centers = project.fit_transform(np.concatenate((centers, embeddings)))[-len(centers):]  # /!\ this is an approximation of the position of the centers in the projected data space. there are no transform method for MDS. for more information, see: https://github.com/scikit-learn/scikit-learn/pull/16088 https://github.com/scikit-learn/scikit-learn/issues/15808
+
+                            axs[j, i + k * len(CLUSTERING_ALGORITHMS)].scatter(projection[:, 0], projection[:, 1], s=10, c=labels)
+                            axs[j, i + k * len(CLUSTERING_ALGORITHMS)].scatter(centers[:, 0], centers[:, 1], c="r", s=20)
+                            axs[j, i + k * len(CLUSTERING_ALGORITHMS)].set_title(f"{algorithm_name} : {n_clusters} clusters {'(MDS={})'.format(n_mds) if k == 0 else ''}")
 
 
     # Save clustering results
