@@ -2,11 +2,26 @@
 import torch
 
 
-def mutual_random_reduce(logits_p : torch.Tensor, logits_q: torch.Tensor, remaining_dim : int): # convert tensors of size [B x C] to [B x D] with D << C
+def mutual_random_reduce(logits_p : torch.Tensor, logits_q: torch.Tensor, remaining_dim : int): # convert tensors of size [B x C] to [B x D] with D << C, select random subset of the dimensions
     dim_idx = torch.randperm(logits_p.shape[-1])[:remaining_dim]
     reduced_logits_p = logits_p[...,dim_idx]
     reduced_logits_q = logits_q[...,dim_idx]
     return reduced_logits_p, reduced_logits_q
+
+
+def mutual_max_reduce(logits_p : torch.Tensor, logits_q: torch.Tensor, remaining_dim : int): # convert tensors of size [B x C] to [B x D] with D << C, select dimensions with highest probability
+    nb_dim_p = remaining_dim // 2
+    nb_dim_q = remaining_dim - nb_dim_p
+
+    dim_idx_p = torch.topk(logits_p, nb_dim_p).indices
+    dim_idx_q = torch.topk(logits_q, nb_dim_q).indices
+    dim_idx = torch.cat([dim_idx_p, dim_idx_q], dim=-1)
+    dim_id0 = torch.arange(logits_p.shape[0]).unsqueeze(-1).repeat(1, remaining_dim)
+
+    reduced_logits_p = logits_p[dim_id0, dim_idx]
+    reduced_logits_q = logits_q[dim_id0, dim_idx]
+    return reduced_logits_p, reduced_logits_q
+
 
 
 def batch_mutual_information_loss(logits_p: torch.Tensor, logits_q: torch.Tensor):

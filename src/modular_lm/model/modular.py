@@ -4,7 +4,7 @@ from typing import Optional, Callable, Union, List, Tuple
 from dataclasses import dataclass
 
 from ..router.loader import load_router
-from ..loss.mi import batch_mutual_information_loss, mutual_random_reduce
+from ..loss.mi import batch_mutual_information_loss, mutual_random_reduce, mutual_max_reduce
 
 import torch
 from transformers import PreTrainedModel, PretrainedConfig, AutoModelForCausalLM, AutoConfig, LlamaForCausalLM
@@ -90,7 +90,8 @@ class ModularConfig(PretrainedConfig):
                  nb_modules : int = 4, 
                  invariant_weight : float = 1.0, 
                  hidden_dropout_prob : float = 0.1, 
-                 mi_dim_reduction : int = 1024, 
+                 mi_dim_reduction : int = 1024,
+                 mi_dim_reduce_method : str = "max",
                  is_peft : Union[bool,str,List[str]] = True, 
                  peft_config : Optional[dict] = None,
                 **kwargs):
@@ -100,6 +101,7 @@ class ModularConfig(PretrainedConfig):
         self.invariant_weight = invariant_weight
         self.hidden_dropout_prob = hidden_dropout_prob
         self.mi_dim_reduction = mi_dim_reduction
+        self.mi_dim_reduce_method = mi_dim_reduce_method
         self.is_peft = is_peft
         self.peft_config = peft_config
         self.base_model_path = base_model_path
@@ -160,6 +162,14 @@ class ModularModel(LlamaForCausalLM):
         self.mi_dim_reduction = config.mi_dim_reduction
         self.is_peft = config.is_peft
 
+        if config.mi_dim_reduce_method.lower() == "max":
+            self.mi_dim_reduction_method = mutual_max_reduce
+        elif config.mi_dim_reduce_method.lower() == "random":
+            self.mi_dim_reduction_method = mutual_random_reduce
+        else:
+            raise ValueError(f"Invalid mutual information dimension reduction method {config.mi_dim_reduce_method}.")
+
+
         self.domain_models = torch.nn.ModuleList()
         self.routing_strategy = load_router(config.routing_strategy_name, config.routing_strategy_config, config.routing_strategy_save)
 
@@ -218,7 +228,7 @@ class ModularModel(LlamaForCausalLM):
             output_attentions=output_attentions,
         )
         domain_weights, routing_loss = self.compute_weights(router_outputs.hidden_states[-1])
-        
+
         # Compute invariant outputs
         invariant_outputs = self.invariant_model(
             input_ids,
@@ -252,13 +262,13 @@ class ModularModel(LlamaForCausalLM):
             )
             domain_logits_i = self.dropout(domain_outputs_i.logits)
             domain_logits_i = domain_logits_i.to(invariant_logits.device)
-            reduced_invariant_logits, reduced_domain_logits_i = mutual_random_reduce(invariant_logits.view(batch_size, -1), domain_logits_i.view(batch_size, -1), self.mi_dim_reduction) # reduce the dimensionality of the logits to avoid memory overflow
+            reduced_invariant_logits, reduced_domain_logits_i = self.mi_dim_reduction_method(invariant_logits.view(batch_size, -1), domain_logits_i.view(batch_size, -1), self.mi_dim_reduction) # reduce the dimensionality of the logits to avoid memory overflow
             mi_loss += batch_mutual_information_loss(reduced_invariant_logits, reduced_domain_logits_i)
             domain_outputs.append(domain_outputs_i)
             domain_logits.append(domain_logits_i) # TODO: check tensors are passed by value
 
         domain_logits = torch.stack(domain_logits, dim=1)
-        domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1, 1)).to(invariant_logits.device)
+        domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if len(domain_weights.shape) < 3 else domain_weights.size(2), 1)).to(invariant_logits.device)
         aggregated_domain_logits = torch.sum(domain_weights * domain_logits, dim=1)
         logits = self.invariant_weight * invariant_logits + aggregated_domain_logits
         probas = torch.sigmoid(logits)
@@ -276,8 +286,9 @@ class ModularModel(LlamaForCausalLM):
             # Enable model parallelism
             shift_labels = shift_labels.to(shift_logits.device)
             loss = loss_fct(shift_logits, shift_labels)
+            # loss = loss.unsqueeze(0) # to avoid warning upon gathering when using data parallelism
 
-        
+        # mi_loss = mi_loss.unsqueeze(0)  # to avoid warning upon gathering when using data parallelism
         output_past_key_values = None if not use_cache else router_outputs.past_key_values + invariant_outputs.past_key_values + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.past_key_values)
         output_hidden_states = None if not output_hidden_states else router_outputs.hidden_states + invariant_outputs.hidden_states + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.hidden_states)
         output_attentions = None if not output_attentions else router_outputs.attentions + invariant_outputs.attentions + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.attentions)
