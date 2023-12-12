@@ -70,7 +70,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_path"], **model_config["tokenizer_config"])
     tokenizer.pad_token = tokenizer.eos_token
     def tokenize_function(examples):
-        tokenized = tokenizer(" ".join(examples['text']), padding="max_length", truncation=True, max_length=model_config["max_length"])
+        tokenized = tokenizer(examples['text'], padding="max_length", truncation=True, max_length=model_config["max_length"])
         if "labels" in examples:
             tokenized["labels"] = tokenizer(examples["labels"], padding="max_length", truncation=True, max_length=model_config["max_length"])["input_ids"]
         else:
