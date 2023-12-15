@@ -44,14 +44,20 @@ def main():
     with open(args.dataset_config, "r") as data_config_file:
         data_config = yaml.safe_load(data_config_file)
 
+    if args.router_config is not None: # saved clusters are from a routing strategy: /!\ `args.saved_clusters_path` should usually be provided
+        # Load router config file
+        with open(args.router_config, "r") as router_config_file:
+            router_config = yaml.safe_load(router_config_file)
+    else:
+        router_config = None
 
-    # Load the dataset
+
     # Load evaluation dataset
     if "huggingface" in data_config and data_config["huggingface"]:
         dataset = load_dataset(data_config["dataset_path"], **data_config["dataset_config"])
     elif "evals" in data_config and data_config["evals"]:
-        dataset = Dataset.from_generator(ProxyDataset(data_config["dataset_path"], **data_config["dataset_config"]).generator)
-        
+        proxy = ProxyDataset(data_config["dataset_path"], **data_config["dataset_config"])
+        dataset = Dataset.from_generator(proxy.generator)
     dataset = dataset.train_test_split(test_size=0.2, shuffle=True, seed=42)
     dataset = dataset["train"]
 
@@ -67,8 +73,14 @@ def main():
     # Compute the embeddings for each sample in the dataset using the loaded model
     embeddings = []
     batch = []
+    if "dataset" in dataset[0]:
+        gt_datasets = []
+    else:
+        gt_datasets = None
     for i in tqdm.trange(len(dataset)):
         batch.append(dataset[i]['text'])
+        if gt_datasets is not None:
+            gt_datasets.append(int(dataset[i]['dataset']))
 
         if len(batch) == args.batch_size:
             input_ids = tokenizer(batch, return_tensors='pt', padding="max_length", truncation=True, max_length=model_config["max_length"])
@@ -86,31 +98,65 @@ def main():
 
     embeddings = np.array(embeddings)
 
+    if router_config is None or router_config['router_name'].startswith("input-"): 
+        mds_embeddings = embeddings.sum(axis=1) # sum the embeddings of each token in the input to get sentence embeddings [B x D]
+        granularity = "sentence"
+    else:
+        embeddings = np.moveaxis(embeddings, 1, 0) # [B x L x D] -> [L x B x D]
+        embeddings = np.random.permutation(embeddings)[:1,...] # shuffle and remove B(L-1) tokens to get [1 x B x D] token embeddings
+        embeddings = np.moveaxis(embeddings, 1, 0) # [1 x B x D] -> [B x 1 x D]
+
+        mds_embeddings = embeddings.reshape(-1, embeddings.shape[-1]) # flatten the embeddings to get a token embeddings [B x D]
+        granularity = "token"
+
+
+
+    # If ground truth datasets are provided, plot the embeddings with different colors for each dataset
+    if gt_datasets is not None:
+        project = MDS(n_components=2)
+        projection = project.fit_transform(mds_embeddings)
+
+        fig, axs = plt.subplots(1, 1, figsize=(9, 8))
+        axs.scatter(projection[:, 0], projection[:, 1], s=10, c=gt_datasets)
+        axs.set_title(f"Ground truth datasets")
+
+        # Save clustering results
+        save_folder = f"cluster_results/{model_config['model_name']}_{data_config['dataset_name']}_{granularity}"
+        save_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        os.makedirs(save_folder, exist_ok=True)
+        plt.savefig(f"{save_folder}/{save_time}_gt_datasets.png")
+
 
     # Run the sklearn k-means algorithm on the embeddings
-    if args.router_config is not None: # saved clusters are from a routing strategy: /!\ `args.saved_clusters_path` should usually be provided
-
-        # Load model config file
-        with open(args.router_config, "r") as router_config_file:
-            router_config = yaml.safe_load(router_config_file)
+    if router_config is not None: # saved clusters are from a routing strategy: /!\ `args.saved_clusters_path` should usually be provided
 
         algo = load_router(router_config['router_path'], router_config['routing_strategy'], args.saved_clusters_path)
 
-        if router_config['router_name'] in ["input-kmeans-cluster", "token-kmeans-cluster"]: # save from sklearn clustering algorithm
+        if router_config['router_name'].endswith("-cluster"): # save from sklearn clustering algorithm
             algo.clustering_algorithm.cluster_centers_ = algo.clustering_algorithm.cluster_centers_.astype(np.float64)
             labels, _ = algo(torch.as_tensor(embeddings,dtype=torch.float64))
+
+            if router_config['router_name'].startswith("token-"):
+                labels = labels.reshape(-1, labels.shape[-1])
+
             labels = labels.argmax(-1).detach().cpu().numpy()
             centers = algo.clustering_algorithm.cluster_centers_
 
-        elif router_config['router_name'] in ["input-hard-quantizer", "token-hard-quantizer", "input-soft-quantizer", "token-soft-quantizer"]: # save from torch routing model
+        elif router_config['router_name'].endswith("-quantizer"): # save from torch routing model
             labels, _ = algo(torch.as_tensor(embeddings, dtype=torch.float32))
-            print(labels)
+
+            if router_config['router_name'].startswith("token-"):
+                labels = labels.reshape(-1, labels.shape[1])
+                print("labels 2", labels.shape)
+
             labels = labels.argmax(-1).detach().cpu().numpy()
             centers = algo.embedding.weight.detach().cpu().numpy()
+        else:
+            raise ValueError(f"Unknown router name: {router_config['router_name']}")
 
         project = MDS(n_components=2)
-        projection = project.fit_transform(embeddings.sum(axis=1))
-        centers = project.fit_transform(np.concatenate((centers, embeddings.sum(axis=1))))[-len(centers):] # /!\ this is an approximation of the position of the centers in the projected data space. there are no transform method for MDS. for more information, see: https://github.com/scikit-learn/scikit-learn/pull/16088 https://github.com/scikit-learn/scikit-learn/issues/15808
+        projection = project.fit_transform(mds_embeddings)
+        centers = project.fit_transform(np.concatenate((centers, mds_embeddings)))[-len(centers):] # /!\ this is an approximation of the position of the centers in the projected data space. there are no transform method for MDS. for more information, see: https://github.com/scikit-learn/scikit-learn/pull/16088 https://github.com/scikit-learn/scikit-learn/issues/15808
 
         # create single plot figure
         fig, axs = plt.subplots(1, 1, figsize=(9, 8))
@@ -119,20 +165,18 @@ def main():
         axs.set_title(f"{router_config['router_name']} : {router_config['routing_strategy']['num_embeddings']} clusters")
 
     else: # no saves or custom save from previous clustering.py run
-        embeddings = embeddings.sum(axis=1)
-
         n_mds = 2
         cluster_lists = [4, 8, 16]
 
         project = MDS(n_components=n_mds)
-        projection = project.fit_transform(embeddings)
+        projection = project.fit_transform(mds_embeddings)
 
         fig, axs = plt.subplots(
             2 * len(CLUSTERING_ALGORITHMS), len(cluster_lists), figsize=(24, 20)
         )
         axs = axs.T
         algos = []
-        for k, data in enumerate([projection, embeddings]):
+        for k, data in enumerate([projection, mds_embeddings]):
             for i, (algorithm_name, Algorithm) in enumerate(CLUSTERING_ALGORITHMS.items()):
                 for j, n_clusters in enumerate(cluster_lists):
                             if args.saved_clusters_path is None:
@@ -145,8 +189,8 @@ def main():
                                 labels = algo.predict(data)
 
                             centers = algo.cluster_centers_
-                            if data is embeddings:
-                                centers = project.fit_transform(np.concatenate((centers, embeddings)))[-len(centers):]  # /!\ this is an approximation of the position of the centers in the projected data space. there are no transform method for MDS. for more information, see: https://github.com/scikit-learn/scikit-learn/pull/16088 https://github.com/scikit-learn/scikit-learn/issues/15808
+                            if data is mds_embeddings:
+                                centers = project.fit_transform(np.concatenate((centers, mds_embeddings)))[-len(centers):]  # /!\ this is an approximation of the position of the centers in the projected data space. there are no `transform` method for MDS. for more information, see: https://github.com/scikit-learn/scikit-learn/pull/16088 https://github.com/scikit-learn/scikit-learn/issues/15808
 
                             axs[j, i + k * len(CLUSTERING_ALGORITHMS)].scatter(projection[:, 0], projection[:, 1], s=10, c=labels)
                             axs[j, i + k * len(CLUSTERING_ALGORITHMS)].scatter(centers[:, 0], centers[:, 1], c="r", s=20)
@@ -154,7 +198,7 @@ def main():
 
 
     # Save clustering results
-    save_folder = f"cluster_results/{model_config['model_name']}_{data_config['dataset_name']}"
+    save_folder = f"cluster_results/{model_config['model_name']}_{data_config['dataset_name']}_{granularity}"
     save_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     os.makedirs(save_folder, exist_ok=True)
     plt.savefig(f"{save_folder}/{save_time}.png")
