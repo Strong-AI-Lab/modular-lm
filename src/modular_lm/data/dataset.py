@@ -51,13 +51,15 @@ class JointEvalsDataset(IterableDataset):
     
     def __next__(self):
         try:
-            return next(self.datasets[self.current_dataset])
+            v = next(self.datasets[self.current_dataset])
         except StopIteration:
             self.current_dataset += 1
             if self.current_dataset < len(self.datasets):
-                return next(self)
+                v = next(self)
             else:
                 raise StopIteration("End of dataset reached.")
+        v["dataset"] = str(self.current_dataset)
+        return v
             
     def __len__(self):
         return sum([len(dataset) for dataset in self.datasets])
