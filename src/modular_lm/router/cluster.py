@@ -49,11 +49,13 @@ class Cluster(torch.nn.Module):
 class TokenLevelCluster(Cluster, TokenLevelRouting):
 
     def compute_routing(self, latents: torch.Tensor) -> torch.Tensor:
+        latent_shape = latents.shape
         latents = latents.view(-1, latents.shape[-1]) # [B x L x D] -> [BL x D]
         data = latents.detach().cpu().numpy() # non differentiable operation
         labels = self.clustering_algorithm.predict(data)
         labels = F.one_hot(torch.tensor(labels, device=latents.device, dtype=torch.int64), num_classes=self.num_embeddings).float() # non differentiable operation
-        labels = labels.view(latents.shape[0], latents.shape[1], self.num_embeddings) # [BL x K] -> [B x L x K]
+        labels = labels.view(latent_shape[0], latent_shape[1], self.num_embeddings) # [BL x K] -> [B x L x K]
+        labels = labels.permute(0, 2, 1) # [B x L x K] -> [B x K x L]
 
         return labels , None
 
