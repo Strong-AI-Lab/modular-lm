@@ -1,0 +1,6 @@
+
+dataset_name: "ACRE"
+dataset_path: "../Logical-and-abstract-reasoning/data/ACRE/symbolic/IID/test.jsonl"
+evals: true
+dataset_config:
+  max_size: 1000
