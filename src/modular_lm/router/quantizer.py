@@ -93,10 +93,12 @@ class InputQuantizer(InputLevelRouting):
                  num_embeddings: int,
                  embedding_dim: int,
                  quantize_fn: str = "hard",
+                 beta: float = 0.25,
                  **kwargs):
         super(InputQuantizer, self).__init__()
         self.K = num_embeddings
         self.D = embedding_dim
+        self.beta = beta
 
         self.embedding = torch.nn.Embedding(self.K, self.D)
         self.embedding.weight.data.uniform_(-1 / self.K, 1 / self.K)
@@ -125,15 +127,15 @@ class InputQuantizer(InputLevelRouting):
         dist = dist.view((latents_shape[0], latents_shape[1], self.K))  # [B x L x K]
         dist = dist.sum(dim=1)  # [B x K]
         
-        return self.quantize_fn(dist)
+        return self.quantize_fn(dist, latents, latents_shape)
     
-    def _hard_quantize(self, distances: torch.Tensor) -> torch.Tensor:
+    def _hard_quantize(self, distances: torch.Tensor, latents: torch.Tensor, latents_shape: torch.Size) -> torch.Tensor:
         return F.one_hot(distances.argmin(dim=-1), num_classes=self.K).float(), None # non-differentiable operation
     
-    def _soft_quantize(self, distances: torch.Tensor) -> torch.Tensor:
+    def _soft_quantize(self, distances: torch.Tensor, latents: torch.Tensor, latents_shape: torch.Size) -> torch.Tensor:
         return F.softmin(distances, dim=-1), None
     
-    def _gumbel_quantize(self, distances: torch.Tensor) -> torch.Tensor:
+    def _gumbel_quantize(self, distances: torch.Tensor, latents: torch.Tensor, latents_shape: torch.Size) -> torch.Tensor:
         return F.gumbel_softmax(distances, tau=1.0, hard=True), None
     
     def _vector_quantize(self, distances: torch.Tensor, latents: torch.Tensor, latents_shape: torch.Size) -> torch.Tensor:
@@ -149,7 +151,7 @@ class InputQuantizer(InputLevelRouting):
 
         vq_loss = commitment_loss * self.beta + embedding_loss
 
-        return encoding_one_hot.view((latents_shape[0], latents_shape[1], self.K)), vq_loss
+        return encoding_one_hot.view((latents_shape[0], self.K)), vq_loss
     
     def save_strategy(self, path: str):
         torch.save(self.embedding.weight.data, os.path.join(path, "embeddings.pt"))
