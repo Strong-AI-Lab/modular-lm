@@ -95,11 +95,12 @@ def main():
     if router_config["router_path"].endswith("LevelCluster") and "pretrain_cluster" in router_config and router_config["pretrain_cluster"]:
         embeddings = []
         batch = []
+        cluster_batch_size = trainer_config["training_arguments"]["per_device_train_batch_size"] if "pretrain_batch_size" not in router_config else router_config["pretrain_batch_size"]
         for i in tqdm.trange(len(dataset["train"])):
             text = " ".join(dataset["train"][i]['text'])
             batch.append(text)
 
-            if len(batch) == trainer_config["training_arguments"]["per_device_train_batch_size"] or i == len(dataset) - 1:
+            if len(batch) == cluster_batch_size or i == len(dataset) - 1:
                 input_ids = tokenizer(batch, return_tensors='pt', padding="max_length", truncation=True, max_length=model_config["max_length"])
                 batch = []
 

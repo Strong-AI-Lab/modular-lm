@@ -3,5 +3,5 @@ router_path: "TokenLevelCluster"
 pretrain_cluster: true
 routing_strategy:
   clustering_algorithm: "K-Means"
-  num_embeddings: 4 # Must be equal to "nb_modules" in model config
+  num_embeddings: 2 # Must be equal to "nb_modules" in model config
   training_latents: null

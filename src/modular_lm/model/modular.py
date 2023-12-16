@@ -141,7 +141,7 @@ class ModularOutput(ModelOutput):
 
 
 
-class ModularModel(LlamaForCausalLM):
+class ModularModel(PreTrainedModel):
 
     @classmethod
     def load_base_model(cls, model_path : str, model_config : dict, is_peft : bool = True, peft_config : Optional[dict] = None):
