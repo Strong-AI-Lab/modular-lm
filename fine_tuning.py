@@ -25,6 +25,8 @@ def main():
     parser.add_argument("router_config")
     parser.add_argument("dataset_config")
     parser.add_argument("trainer_config")
+    parser.add_argument("--local_rank", type=int, default=-1)
+    parser.add_argument("--deepspeed", type=str, default=None)
     args = parser.parse_args()
     
     # Load model config file
@@ -55,6 +57,8 @@ def main():
 
 
     # Load model
+    if args.local_rank != -1:
+        model_config["model_config"]["device_map"] = args.local_rank
     config = ModularConfig.from_pretrained(
                  "config/model/modular_pretrained/config.json",
                  base_model_path = model_config["model_path"], 
@@ -118,7 +122,7 @@ def main():
 
 
     # Train model
-    training_args = TrainingArguments(**trainer_config["training_arguments"])
+    training_args = TrainingArguments(local_rank=args.local_rank, deepspeed=args.deepspeed, **trainer_config["training_arguments"])
     trainer = RoutingTrainer(
         model=model,
         args=training_args,
