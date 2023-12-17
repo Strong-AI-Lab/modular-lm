@@ -33,10 +33,10 @@ def batch_mutual_information_loss(logits_p: torch.Tensor, logits_q: torch.Tensor
     p_xy = torch.einsum("ij,ik->ijk", logits_p.softmax(dim=-1), logits_q.softmax(dim=-1)) # [B x C], [B x C] -> [B x C x C], compute ∑_S P(X|S) ⊗ P(Y|S) = ∑_S P(X,Y|S) = P(X,Y) for all samples S in batch B as X and Y are conditionally independent given S
     logits_xy =  torch.log(p_xy + 1e-8).sum(dim=0) # [B x C x C] -> [C x C], perform summation of above formula
 
-    mi_loss = torch.nn.KLDivLoss(reduction="mean", log_target=True)(
+    mi_loss = torch.nn.KLDivLoss(reduction="none", log_target=True)(
         logits_xy.view((-1)), # [C x C] -> [CC]
         logits_p_x_p_y.view((-1)), # [C x C] -> [CC]
-    )
+    ).mean()
     return mi_loss
 
 
