@@ -230,18 +230,19 @@ class ModularModel(PreTrainedModel):
         domain_weights, routing_loss = self.compute_weights(router_outputs.hidden_states[-1])
 
         # Compute invariant outputs
-        invariant_outputs = self.invariant_model(
-            input_ids,
-            attention_mask=attention_mask,
-            return_dict=True,
-            position_ids=position_ids,
-            past_key_values=None if past_key_values is None else past_key_values[nb_keys_per_module:2*nb_keys_per_module],
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-        )
-        invariant_logits = self.dropout(invariant_outputs.logits)
+        if self.invariant_weight >= 1e-6: # compute invariant logits only if invariant weight is non-zero
+            invariant_outputs = self.invariant_model(
+                input_ids,
+                attention_mask=attention_mask,
+                return_dict=True,
+                position_ids=position_ids,
+                past_key_values=None if past_key_values is None else past_key_values[nb_keys_per_module:2*nb_keys_per_module],
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+            )
+            invariant_logits = self.dropout(invariant_outputs.logits)
 
         # Compute domain outputs
         domain_outputs = []
@@ -269,10 +270,20 @@ class ModularModel(PreTrainedModel):
 
         domain_logits = torch.stack(domain_logits, dim=1)
         domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if len(domain_weights.shape) < 3 else domain_weights.size(2), 1)).to(invariant_logits.device)
-        aggregated_domain_logits = torch.sum(domain_weights * domain_logits, dim=1)
-        logits = self.invariant_weight * invariant_logits + aggregated_domain_logits
-        probas = torch.sigmoid(logits)
-        # probas = torch.softmax(logits, dim=-1)
+        
+        domain_logits = torch.logit(domain_weights * torch.sigmoid(domain_logits), eps=1e-6) # Multiply probas by weights and convert backs to logits, clamp to avoid -inf, use sigmoid as cheaper than softmax and loss takes unnormalised logits
+        domain_logits = domain_logits[torch.where(~(domain_weights < 1e-6).all(dim=3).all(dim=2))] # Remove modules with probas < 1e-6 (logits close to -inf)
+        if len(domain_logits.shape) < 4: # if multiples modules are used, sum logits, otherwise use only one module 
+            aggregated_domain_logits = domain_logits
+        else:
+            aggregated_domain_logits = torch.sum(domain_logits, dim=1) # Sum weighted logits from all modules
+
+        if self.invariant_weight >= 1e-6: # if invariant weight is non-zero, sum invariant logits with domain logits, otherwise only use domain logits
+            logits = torch.logit(self.invariant_weight * torch.sigmoid(invariant_logits), eps=1e-6) + aggregated_domain_logits
+        else:
+            logits = aggregated_domain_logits
+
+        probas = torch.softmax(logits, dim=-1)
 
         loss = None
         if labels is not None: # from https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L1059
@@ -294,8 +305,8 @@ class ModularModel(PreTrainedModel):
         output_attentions = None if not output_attentions else router_outputs.attentions + invariant_outputs.attentions + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.attentions)
 
         if not return_dict:
-                output = (logits, probas, routing_loss, mi_loss, invariant_logits, aggregated_domain_logits, domain_weights, output_past_key_values, output_hidden_states, output_attentions)
-                return (loss,) + output if loss is not None else output
+            output = (logits, probas, routing_loss, mi_loss, invariant_logits, aggregated_domain_logits, domain_weights, output_past_key_values, output_hidden_states, output_attentions)
+            return (loss,) + output if loss is not None else output
 
         return ModularOutput(
             logits=logits,
