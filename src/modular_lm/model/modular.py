@@ -243,6 +243,10 @@ class ModularModel(PreTrainedModel):
                 output_hidden_states=output_hidden_states,
             )
             invariant_logits = self.dropout(invariant_outputs.logits)
+            domain_device = invariant_logits.device
+        else:
+            invariant_logits = None
+            domain_device = router_outputs.hidden_states[-1].device
 
         # Compute domain outputs
         domain_outputs = []
@@ -262,23 +266,26 @@ class ModularModel(PreTrainedModel):
                 output_hidden_states=output_hidden_states,
             )
             domain_logits_i = self.dropout(domain_outputs_i.logits)
-            domain_logits_i = domain_logits_i.to(invariant_logits.device)
-            reduced_invariant_logits, reduced_domain_logits_i = self.mi_dim_reduction_method(invariant_logits.view(batch_size, -1), domain_logits_i.view(batch_size, -1), self.mi_dim_reduction) # reduce the dimensionality of the logits to avoid memory overflow
-            mi_loss += batch_mutual_information_loss(reduced_invariant_logits, reduced_domain_logits_i)
+            domain_logits_i = domain_logits_i.to(domain_device)
+
+            if invariant_logits is not None: # if invariant weight is non-zero, compute mutual information loss
+                reduced_invariant_logits, reduced_domain_logits_i = self.mi_dim_reduction_method(invariant_logits.view(batch_size, -1), domain_logits_i.view(batch_size, -1), self.mi_dim_reduction) # reduce the dimensionality of the logits to avoid memory overflow
+                mi_loss += batch_mutual_information_loss(reduced_invariant_logits, reduced_domain_logits_i)
+            
             domain_outputs.append(domain_outputs_i)
-            domain_logits.append(domain_logits_i) # TODO: check tensors are passed by value
+            domain_logits.append(domain_logits_i)
 
         domain_logits = torch.stack(domain_logits, dim=1)
-        domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if len(domain_weights.shape) < 3 else domain_weights.size(2), 1)).to(invariant_logits.device)
+        domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if len(domain_weights.shape) < 3 else domain_weights.size(2), 1)).to(domain_device)
         
-        domain_logits = torch.logit(domain_weights * torch.sigmoid(domain_logits), eps=1e-6) # Multiply probas by weights and convert backs to logits, clamp to avoid -inf, use sigmoid as cheaper than softmax and loss takes unnormalised logits
+        domain_logits = torch.logit(domain_weights * torch.sigmoid(domain_logits), eps=1e-6) # Multiply probas by weights and convert back to logits, clamp to avoid -inf, use sigmoid as cheaper than softmax and loss takes unnormalised logits
         domain_logits = domain_logits[torch.where(~(domain_weights < 1e-6).all(dim=3).all(dim=2))] # Remove modules with probas < 1e-6 (logits close to -inf)
         if len(domain_logits.shape) < 4: # if multiples modules are used, sum logits, otherwise use only one module 
             aggregated_domain_logits = domain_logits
         else:
             aggregated_domain_logits = torch.sum(domain_logits, dim=1) # Sum weighted logits from all modules
 
-        if self.invariant_weight >= 1e-6: # if invariant weight is non-zero, sum invariant logits with domain logits, otherwise only use domain logits
+        if invariant_logits is not None: # if invariant weight is non-zero, sum invariant logits with domain logits, otherwise only use domain logits
             logits = torch.logit(self.invariant_weight * torch.sigmoid(invariant_logits), eps=1e-6) + aggregated_domain_logits
         else:
             logits = aggregated_domain_logits
@@ -298,11 +305,16 @@ class ModularModel(PreTrainedModel):
             shift_labels = shift_labels.to(shift_logits.device)
             loss = loss_fct(shift_logits, shift_labels)
             # loss = loss.unsqueeze(0) # to avoid warning upon gathering when using data parallelism
-
         # mi_loss = mi_loss.unsqueeze(0)  # to avoid warning upon gathering when using data parallelism
-        output_past_key_values = None if not use_cache else router_outputs.past_key_values + invariant_outputs.past_key_values + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.past_key_values)
-        output_hidden_states = None if not output_hidden_states else router_outputs.hidden_states + invariant_outputs.hidden_states + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.hidden_states)
-        output_attentions = None if not output_attentions else router_outputs.attentions + invariant_outputs.attentions + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.attentions)
+            
+        # If use_cache is set to True, return past_key_values from all modules. Used in generate() to avoid recomputing the past_key_values at each generation step
+        output_past_key_values = None if not use_cache else router_outputs.past_key_values + ((None,) * len(router_outputs.past_key_values) if invariant_logits is None else invariant_outputs.past_key_values) + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.past_key_values)
+        
+        # If output_hidden_states is set to True, return hidden states from all modules
+        output_hidden_states = None if not output_hidden_states else router_outputs.hidden_states + ((None,) * len(router_outputs.hidden_states) if invariant_logits is None else invariant_outputs.hidden_states) + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.hidden_states)
+        
+        # If output_attentions is set to True, return attentions from all modules
+        output_attentions = None if not output_attentions else router_outputs.attentions + ((None,) * len(router_outputs.attentions) if invariant_logits is None else invariant_outputs.attentions) + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.attentions)
 
         if not return_dict:
             output = (logits, probas, routing_loss, mi_loss, invariant_logits, aggregated_domain_logits, domain_weights, output_past_key_values, output_hidden_states, output_attentions)

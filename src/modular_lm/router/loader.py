@@ -1,5 +1,5 @@
 
-from .cluster import TokenLevelCluster, DiffTokenLevelCluster, InputLevelCluster, DiffInputLevelCluster
+from .cluster import TokenLevelCluster, DiffTokenLevelCluster, InputLevelCluster, DiffInputLevelCluster, MDSInputLevelCluster
 from .quantizer import TokenQuantizer, InputQuantizer
 
 
@@ -9,6 +9,7 @@ ROUTERS = {
     "DiffTokenLevelCluster": DiffTokenLevelCluster,
     "InputLevelCluster": InputLevelCluster,
     "DiffInputLevelCluster": DiffInputLevelCluster,
+    "MDSInputLevelCluster": MDSInputLevelCluster,
     "TokenQuantizer": TokenQuantizer,
     "InputQuantizer": InputQuantizer,
 }

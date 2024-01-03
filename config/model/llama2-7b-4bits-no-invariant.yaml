@@ -7,7 +7,7 @@ tokenizer_config:
   add_eos_token: true
 kwargs:
   nb_modules: 2 # Must be equal to "num_embeddings" in router config
-  invariant_weight: 0.3
+  invariant_weight: 0.0
   hidden_dropout_prob: 0.1
   mi_dim_reduction: 64
   mi_dim_reduce_method: "max"
