@@ -1,6 +1,6 @@
 
 metric: "accuracy"
-routing_weight: 1.0
+routing_weight: 2.0
 mutual_information_weight: 10.0
 training_arguments:
   output_dir: "fine-tuning-output"

@@ -1,6 +1,6 @@
 
 from .cluster import TokenLevelCluster, DiffTokenLevelCluster, InputLevelCluster, DiffInputLevelCluster, MDSInputLevelCluster
-from .quantizer import TokenQuantizer, InputQuantizer
+from .quantizer import TokenQuantizer, InputQuantizer, TokenReductionQuantizer, InputReductionQuantizer
 
 
 
@@ -12,6 +12,8 @@ ROUTERS = {
     "MDSInputLevelCluster": MDSInputLevelCluster,
     "TokenQuantizer": TokenQuantizer,
     "InputQuantizer": InputQuantizer,
+    "TokenReductionQuantizer": TokenReductionQuantizer,
+    "InputReductionQuantizer": InputReductionQuantizer
 }
 
 def load_router(router_name : str, router_config : dict, router_path : str = None):

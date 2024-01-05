@@ -1,0 +1,7 @@
+router_name: "token-reduced-vector-quantizer"
+router_path: "TokenReductionQuantizer"
+routing_strategy:
+  num_embeddings: 2 # Must be equal to "nb_modules" in model config
+  embedding_dim: 4096
+  quantize_fn: "vector"
+  reduction_dim: 64

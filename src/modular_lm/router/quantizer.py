@@ -1,5 +1,6 @@
 
 import os
+from typing import Optional
 
 from .routing_strategy import TokenLevelRouting, InputLevelRouting
 
@@ -17,14 +18,16 @@ class TokenQuantizer(TokenLevelRouting):
                  embedding_dim: int,
                  quantize_fn: str = "hard",
                  beta: float = 0.25,
+                 epsilon: float = 0.1,
                  **kwargs):
         super(TokenQuantizer, self).__init__()
         self.K = num_embeddings
         self.D = embedding_dim
         self.beta = beta
+        self.epsilon = epsilon
 
         self.embedding = torch.nn.Embedding(self.K, self.D)
-        self.embedding.weight.data.uniform_(-1 / self.K, 1 / self.K)
+        self.embedding.weight.data.uniform_(-1 / self.K * self.epsilon, 1 / self.K * self.epsilon)
 
         if quantize_fn == "hard":
             self.quantize_fn = self._hard_quantize
@@ -87,6 +90,35 @@ class TokenQuantizer(TokenLevelRouting):
 
 
 
+class TokenReductionQuantizer(TokenQuantizer):
+    def __init__(self,
+                 num_embeddings: int,
+                 embedding_dim: int,
+                 quantize_fn: str = "hard",
+                 beta: float = 0.25,
+                 epsilon: float = 0.1,
+                 reduction_dim: Optional[int] = 64,
+                 **kwargs):
+        self.embedding_dim = embedding_dim
+        self.reduction_dim = reduction_dim
+        super(TokenReductionQuantizer, self).__init__(num_embeddings, embedding_dim if reduction_dim is None else reduction_dim, quantize_fn, beta, epsilon, **kwargs)
+
+        self.projector = torch.nn.Linear(self.embedding_dim, self.D)
+
+    def compute_routing(self, latents: torch.Tensor) -> torch.Tensor:
+        latents = self.projector(latents)  # [B x L x D] -> [B x L x (reduced) D]
+        return super().compute_routing(latents)
+    
+    def save_strategy(self, path: str):
+        super().save_strategy(path)
+        torch.save(self.projector.state_dict(), os.path.join(path, "projector.pt"))
+    
+    def load_strategy(self, path: str):
+        super().load_strategy(path)
+        self.projector.load_state_dict(torch.load(os.path.join(path, "projector.pt")))
+
+
+
 
 class InputQuantizer(InputLevelRouting):
     def __init__(self,
@@ -94,14 +126,16 @@ class InputQuantizer(InputLevelRouting):
                  embedding_dim: int,
                  quantize_fn: str = "hard",
                  beta: float = 0.25,
+                 epsilon: float = 0.1,
                  **kwargs):
         super(InputQuantizer, self).__init__()
         self.K = num_embeddings
         self.D = embedding_dim
         self.beta = beta
+        self.epsilon = epsilon
 
         self.embedding = torch.nn.Embedding(self.K, self.D)
-        self.embedding.weight.data.uniform_(-1 / self.K, 1 / self.K)
+        self.embedding.weight.data.uniform_(-1 / self.K * self.epsilon, 1 / self.K  * self.epsilon)
 
         if quantize_fn == "hard":
             self.quantize_fn = self._hard_quantize
@@ -159,3 +193,33 @@ class InputQuantizer(InputLevelRouting):
     def load_strategy(self, path: str):
         self.embedding.weight.data = torch.load(os.path.join(path, "embeddings.pt"))
     
+
+
+class InputReductionQuantizer(InputQuantizer):
+    def __init__(self,
+                 num_embeddings: int,
+                 embedding_dim: int,
+                 quantize_fn: str = "hard",
+                 beta: float = 0.25,
+                 epsilon: float = 0.1,
+                 reduction_dim: Optional[int] = 64,
+                 **kwargs):
+        self.embedding_dim = embedding_dim
+        self.reduction_dim = reduction_dim
+        super(InputReductionQuantizer, self).__init__(num_embeddings, embedding_dim if reduction_dim is None else reduction_dim, quantize_fn, beta, epsilon, **kwargs)
+
+        self.projector = torch.nn.Linear(self.embedding_dim, self.D)
+
+    def compute_routing(self, latents: torch.Tensor) -> torch.Tensor:
+        latents = self.projector(latents)  # [B x L x D] -> [B x L x (reduced) D]
+        return super().compute_routing(latents)
+    
+    def save_strategy(self, path: str):
+        super().save_strategy(path)
+        torch.save(self.projector.state_dict(), os.path.join(path, "projector.pt"))
+    
+    def load_strategy(self, path: str):
+        super().load_strategy(path)
+        self.projector.load_state_dict(torch.load(os.path.join(path, "projector.pt")))
+
+

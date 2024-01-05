@@ -6,5 +6,5 @@ routing_strategy:
   clustering_algorithm: "K-Means"
   num_embeddings: 2 # Must be equal to "nb_modules" in model config
   training_latents: null
-  reduction_components: 3
+  reduction_components: 64
   reduction_training_memory_size: 128
