@@ -104,9 +104,16 @@ class TokenReductionQuantizer(TokenQuantizer):
         super(TokenReductionQuantizer, self).__init__(num_embeddings, embedding_dim if reduction_dim is None else reduction_dim, quantize_fn, beta, epsilon, **kwargs)
 
         self.projector = torch.nn.Linear(self.embedding_dim, self.D)
+        self.normalizer = torch.nn.BatchNorm1d(self.D)
 
     def compute_routing(self, latents: torch.Tensor) -> torch.Tensor:
         latents = self.projector(latents)  # [B x L x D] -> [B x L x (reduced) D]
+
+        latent_shape = latents.shape
+        latents = latents.view(-1, self.D)  # [B x L x D] -> [BL x D]
+        latents = self.normalizer(latents)
+        latents = latents.view(latent_shape) # [BL x D] -> [B x L x D]
+
         return super().compute_routing(latents)
     
     def save_strategy(self, path: str):
@@ -126,7 +133,7 @@ class InputQuantizer(InputLevelRouting):
                  embedding_dim: int,
                  quantize_fn: str = "hard",
                  beta: float = 0.25,
-                 epsilon: float = 0.1,
+                 epsilon: float = 1.0,
                  **kwargs):
         super(InputQuantizer, self).__init__()
         self.K = num_embeddings
@@ -201,7 +208,7 @@ class InputReductionQuantizer(InputQuantizer):
                  embedding_dim: int,
                  quantize_fn: str = "hard",
                  beta: float = 0.25,
-                 epsilon: float = 0.1,
+                 epsilon: float = 1.0,
                  reduction_dim: Optional[int] = 64,
                  **kwargs):
         self.embedding_dim = embedding_dim
@@ -209,9 +216,16 @@ class InputReductionQuantizer(InputQuantizer):
         super(InputReductionQuantizer, self).__init__(num_embeddings, embedding_dim if reduction_dim is None else reduction_dim, quantize_fn, beta, epsilon, **kwargs)
 
         self.projector = torch.nn.Linear(self.embedding_dim, self.D)
+        self.normalizer = torch.nn.BatchNorm1d(self.D)
 
     def compute_routing(self, latents: torch.Tensor) -> torch.Tensor:
         latents = self.projector(latents)  # [B x L x D] -> [B x L x (reduced) D]
+
+        latent_shape = latents.shape
+        latents = latents.view(-1, self.D)  # [B x L x D] -> [BL x D]
+        latents = self.normalizer(latents)
+        latents = latents.view(latent_shape) # [BL x D] -> [B x L x D]
+
         return super().compute_routing(latents)
     
     def save_strategy(self, path: str):
