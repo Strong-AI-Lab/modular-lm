@@ -279,14 +279,14 @@ class ModularModel(PreTrainedModel):
         domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if len(domain_weights.shape) < 3 else domain_weights.size(2), 1)).to(domain_device)
         domain_probas = torch.softmax(domain_logits, dim=-1)
         domain_costs = torch.sum(domain_probas, dim=-1).unsqueeze(-1) # Compute cost of each domain model
-        domain_logits = torch.log((domain_probas * domain_weights).clamp(min=1e-6,max=1-1e-6)) + torch.log(domain_costs) # Multiply probas by weights and convert back to logits, clamp to avoid NaNs
+        domain_logits = torch.log(((1 - domain_weights) / 2 + domain_probas * domain_weights).clamp(min=1e-6,max=1-1e-6)) + torch.log(domain_costs) # Multiply probas by weights (centered around zero) and convert back to logits, clamp to avoid NaNs
         aggregated_domain_logits = torch.sum(domain_logits, dim=1) # Sum weighted logits from all modules
 
         if invariant_logits is not None: # if invariant weight is non-zero, sum invariant logits with domain logits, otherwise only use domain logits
             probas = torch.softmax(torch.stack([invariant_logits, aggregated_domain_logits], dim=1), dim=-1)
             costs = torch.sum(probas, dim=-1).unsqueeze(-1)
             weights = torch.tensor([self.invariant_weight, 1 - self.invariant_weight], device=domain_device).view((1, 2, 1, 1))
-            logits = torch.log((probas * weights).clamp(min=1e-6,max=1-1e-6)) + torch.log(costs)
+            logits = torch.log(((1 - weights) / 2 + probas * weights).clamp(min=1e-6,max=1-1e-6)) + torch.log(costs)
             logits = torch.sum(logits, dim=1)
         else:
             logits = aggregated_domain_logits
