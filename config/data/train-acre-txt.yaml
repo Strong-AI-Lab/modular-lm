@@ -1,0 +1,6 @@
+
+dataset_name: "TRAIN_ACRE_TXT"
+dataset_path: "../Logical-and-abstract-reasoning/data/ACRE/text/IID/train.jsonl"
+evals: true
+dataset_config:
+  max_size: 9000

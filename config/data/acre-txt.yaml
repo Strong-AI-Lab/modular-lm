@@ -1,5 +1,5 @@
 
-dataset_name: "ACRE"
+dataset_name: "ACRE_TXT"
 dataset_path: "../Logical-and-abstract-reasoning/data/ACRE/text/IID/test.jsonl"
 evals: true
 dataset_config:

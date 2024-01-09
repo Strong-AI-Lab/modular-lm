@@ -8,4 +8,4 @@ dataset_path:
    - "../Logical-and-abstract-reasoning/data/RAVEN/text/center_single_train.jsonl"
 evals: true
 dataset_config:
-  max_size: 100
+  max_size: 1000
