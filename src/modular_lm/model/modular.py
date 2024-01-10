@@ -9,7 +9,7 @@ from ..loss.mi import batch_mutual_information_loss, mutual_random_reduce, mutua
 import torch
 from transformers import PreTrainedModel, PretrainedConfig, AutoModelForCausalLM, AutoConfig, LlamaForCausalLM
 from transformers.utils import ModelOutput
-from peft import get_peft_config, get_peft_model, prepare_model_for_int8_training, PeftModel
+from peft import get_peft_config, get_peft_model, prepare_model_for_kbit_training, PeftModel
 
 
 class ModularConfig(PretrainedConfig):
@@ -149,7 +149,7 @@ class ModularModel(PreTrainedModel):
         model = AutoModelForCausalLM.from_pretrained(model_path, config=config, **model_config)
         if is_peft:
             peft_config = get_peft_config(peft_config)
-            model = prepare_model_for_int8_training(model) # Add this for using int8
+            model = prepare_model_for_kbit_training(model) # Add this for using int8
             model = get_peft_model(model, peft_config) # Add this for using PEFT
         return model
 
@@ -178,6 +178,8 @@ class ModularModel(PreTrainedModel):
             pass
         elif isinstance(self.is_peft, bool) or (isinstance(self.is_peft, str) and self.is_peft.lower() == "all"):
             peft_modules = [True] * (self.nb_modules + 2)
+        elif isinstance(self.is_peft, list) and len(self.is_peft) == self.nb_modules + 2 and all(isinstance(module, bool) for module in self.is_peft):
+            peft_modules = self.is_peft
         elif isinstance(self.is_peft, list):
             peft_modules = [False] * (self.nb_modules + 2)
             for module_name in self.is_peft:
@@ -201,6 +203,7 @@ class ModularModel(PreTrainedModel):
     def forward(
             self,
             input_ids: Optional[torch.Tensor] = None,
+            full_input_ids: Optional[torch.Tensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
             labels: Optional[torch.Tensor] = None,
             position_ids: Optional[torch.LongTensor] = None,
@@ -217,12 +220,12 @@ class ModularModel(PreTrainedModel):
 
         # Compute router outputs
         router_outputs = self.router(
-            input_ids,
+            input_ids if full_input_ids is None else full_input_ids, # past_key_values cannot be used with router, so we need to pass the full input ids during generation
             attention_mask=attention_mask,
             output_hidden_states=True,
             return_dict=True,
             position_ids=position_ids,
-            past_key_values=None if past_key_values is None else past_key_values[0:nb_keys_per_module],
+            past_key_values=None,
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             output_attentions=output_attentions,
@@ -294,7 +297,7 @@ class ModularModel(PreTrainedModel):
         probas = torch.softmax(logits, dim=-1)
 
         loss = None
-        if labels is not None: # from https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L1059
+        if labels is not None: # from https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L1205
             # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
@@ -305,8 +308,6 @@ class ModularModel(PreTrainedModel):
             # Enable model parallelism
             shift_labels = shift_labels.to(shift_logits.device)
             loss = loss_fct(shift_logits, shift_labels)
-            # loss = loss.unsqueeze(0) # to avoid warning upon gathering when using data parallelism
-        # mi_loss = mi_loss.unsqueeze(0)  # to avoid warning upon gathering when using data parallelism
             
         # If use_cache is set to True, return past_key_values from all modules. Used in generate() to avoid recomputing the past_key_values at each generation step
         output_past_key_values = None if not use_cache else router_outputs.past_key_values + ((None,) * len(router_outputs.past_key_values) if invariant_logits is None else invariant_outputs.past_key_values) + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.past_key_values)
@@ -381,7 +382,7 @@ class ModularModel(PreTrainedModel):
         
 
     @classmethod
-    def remove_from_peft(is_peft, module_name, nb_modules):
+    def remove_from_peft(cls, is_peft : Union[bool, list], module_name : str, nb_modules : int):
         if (isinstance(is_peft, bool) and is_peft) or (isinstance(is_peft, str) and is_peft.lower() == "all"):
             is_peft = [True] * (nb_modules + 2)
         
@@ -420,36 +421,48 @@ class ModularModel(PreTrainedModel):
             config.routing_strategy_save = routing_strategy_directory
 
         router_directory = os.path.join(pretrained_model_name_or_path, "router")
-        if os.path.isdir(router_directory) and not os.path.isfile(os.path.join(router_directory, "adapter_config.json")): # if peft modules, load base config first and adapt later 
-            config.router_path = router_directory
-            config.is_peft = cls.remove_from_peft(config.is_peft, "router", config.nb_modules)
+        if os.path.isdir(router_directory):
+            if os.path.isfile(os.path.join(router_directory, "adapter_config.json")): # if peft modules, load base config first (without peft) and adapt later 
+                config.is_peft = cls.remove_from_peft(config.is_peft, "router", config.nb_modules)
+            else: # otherwise, load router directly from save directory
+                config.router_path = router_directory
 
         invariant_directory = os.path.join(pretrained_model_name_or_path, "invariant")
-        if os.path.isdir(invariant_directory) and not os.path.isfile(os.path.join(invariant_directory, "adapter_config.json")):
-            config.invariant_model_path = invariant_directory
-            config.is_peft = cls.remove_from_peft(config.is_peft, "invariant", config.nb_modules)
+        if os.path.isdir(invariant_directory):
+            if os.path.isfile(os.path.join(invariant_directory, "adapter_config.json")): # if peft modules, load base config first (without peft) and adapt later
+                config.is_peft = cls.remove_from_peft(config.is_peft, "invariant", config.nb_modules)
+            else: # otherwise, load invariant directly from save directory
+                config.invariant_model_path = invariant_directory
         
         domain_directories = []
         for i in range(config.nb_modules):
             domain_directory = os.path.join(pretrained_model_name_or_path, f"domain_{i}")
             domain_directories.append(domain_directory)
-            if os.path.isdir(domain_directory) and not os.path.isfile(os.path.join(domain_directory, "adapter_config.json")):
-                config.domain_model_paths[i] = domain_directory
-                config.is_peft = cls.remove_from_peft(config.is_peft, i, config.nb_modules)
-        
+            if os.path.isdir(domain_directory):
+                if os.path.isfile(os.path.join(domain_directory, "adapter_config.json")): # if peft modules, load base config first (without peft) and adapt later
+                    config.is_peft = cls.remove_from_peft(config.is_peft, str(i), config.nb_modules)
+                else: # otherwise, load domain directly from save directory
+                    config.domain_model_paths[i] = domain_directory
+
         # Load model
         model = cls(config)
 
         # If path contains PEFT adapter saves, load them
         if os.path.isfile(os.path.join(router_directory, "adapter_config.json")):
+            model.router = prepare_model_for_kbit_training(model.router)
             model.router = PeftModel.from_pretrained(model.router, router_directory)
+            model.router = model.router.merge_and_unload()
 
         if os.path.isfile(os.path.join(invariant_directory, "adapter_config.json")):
+            model.invariant_model = prepare_model_for_kbit_training(model.invariant_model)
             model.invariant_model = PeftModel.from_pretrained(model.invariant_model, invariant_directory)
+            model.invariant_model = model.invariant_model.merge_and_unload()
 
         for i in range(config.nb_modules):
             if os.path.isfile(os.path.join(domain_directories[i], "adapter_config.json")):
+                model.domain_models[i] = prepare_model_for_kbit_training(model.domain_models[i])
                 model.domain_models[i] = PeftModel.from_pretrained(model.domain_models[i], domain_directories[i])
+                model.domain_models[i] = model.domain_models[i].merge_and_unload()
 
         return model
     
@@ -458,6 +471,7 @@ class ModularModel(PreTrainedModel):
     def prepare_inputs_for_generation( # Taken from <https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L1227>
         self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
     ):
+        full_input_ids = None
         if past_key_values is not None:
             past_length = past_key_values[0][0].shape[2]
 
@@ -468,6 +482,7 @@ class ModularModel(PreTrainedModel):
                 # Default to old behavior: keep only final ID
                 remove_prefix_length = input_ids.shape[1] - 1
 
+            full_input_ids = input_ids.clone()
             input_ids = input_ids[:, remove_prefix_length:]
 
         position_ids = kwargs.get("position_ids", None)
@@ -490,6 +505,7 @@ class ModularModel(PreTrainedModel):
                 "past_key_values": past_key_values,
                 "use_cache": kwargs.get("use_cache"),
                 "attention_mask": attention_mask,
+                "full_input_ids": full_input_ids
             }
         )
         return model_inputs

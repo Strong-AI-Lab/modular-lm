@@ -73,14 +73,22 @@ def main():
     
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_path"], **model_config["tokenizer_config"])
     tokenizer.pad_token = tokenizer.eos_token
-    def tokenize_function(examples):
-        tokenized = tokenizer(examples['text'], padding="max_length", truncation=True, max_length=model_config["max_length"])
+    def tokenize_function(examples): # Non-batched tokenizer
         if "labels" in examples:
-            tokenized["labels"] = tokenizer(examples["labels"], padding="max_length", truncation=True, max_length=model_config["max_length"])["input_ids"]
+            prompt = examples["text"] + examples["labels"]
         else:
-            tokenized["labels"] = tokenized["input_ids"].copy()
-        return tokenized
+            prompt = examples["text"]
+        
+        tokenized = tokenizer(prompt, return_tensors="pt", padding="max_length", truncation=True, max_length=model_config["max_length"])
+        tokenized["input_ids"] = tokenized["input_ids"].squeeze(0)
+        tokenized["attention_mask"] = tokenized["attention_mask"].squeeze(0)
 
+        tokenized["labels"] = tokenized["input_ids"].clone()
+        if "labels" in examples:
+            label_len = len(tokenizer.encode(examples["labels"]))
+            tokenized["labels"][:-label_len] = -100
+        
+        return tokenized
 
     # Load evaluation dataset
     if "huggingface" in data_config and data_config["huggingface"]:

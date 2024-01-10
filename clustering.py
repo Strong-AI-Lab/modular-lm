@@ -147,7 +147,6 @@ def main():
 
             if router_config['router_name'].startswith("token-"):
                 labels = labels.reshape(-1, labels.shape[1])
-                print("labels 2", labels.shape)
 
             labels = labels.argmax(-1).detach().cpu().numpy()
             centers = algo.embedding.weight.detach().cpu().numpy()
