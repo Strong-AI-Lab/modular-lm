@@ -25,18 +25,18 @@ def mutual_max_reduce(logits_p : torch.Tensor, logits_q: torch.Tensor, remaining
 
 
 def batch_mutual_information_loss(logits_p: torch.Tensor, logits_q: torch.Tensor):
-    p_x = logits_p.sum(dim=0).softmax(dim=-1) # [B x C] -> [C], compute P(X)
-    p_y = logits_q.sum(dim=0).softmax(dim=-1) # [B x C] -> [C], compute P(Y)
+    p_x = logits_p.softmax(dim=-1).mean(dim=0) # [B x C] -> [C], compute P(X)
+    p_y = logits_q.softmax(dim=-1).mean(dim=0) # [B x C] -> [C], compute P(Y)
     p_x_p_y = torch.einsum("i,j->ij", p_x, p_y) # [C], [C] -> [C x C], compute outer product P(X) ⊗ P(Y)
-    logits_p_x_p_y = torch.log(p_x_p_y + 1e-8) # [C x C]
+    log_p_x_p_y = p_x_p_y.clamp(min=1e-6, max=1-1e-6).log()
 
-    p_xy = torch.einsum("ij,ik->ijk", logits_p.softmax(dim=-1), logits_q.softmax(dim=-1)) # [B x C], [B x C] -> [B x C x C], compute ∑_S P(X|S) ⊗ P(Y|S) = ∑_S P(X,Y|S) = P(X,Y) for all samples S in batch B as X and Y are conditionally independent given S
-    logits_xy =  torch.log(p_xy + 1e-8).sum(dim=0) # [B x C x C] -> [C x C], perform summation of above formula
+    p_xy = torch.einsum("ij,ik->ijk", logits_p.softmax(dim=-1), logits_q.softmax(dim=-1)) # [B x C], [B x C] -> [B x C x C], compute ∑_S P(X|S) ⊗ P(Y|S) P(S) = ∑_S P(X,Y|S) P(S) = P(X,Y) P(S) for all samples S in batch B as X and Y are conditionally independent given S
+    log_xy =  p_xy.mean(dim=0).clamp(min=1e-6, max=1-1e-6).log() # [B x C x C] -> [C x C], perform summation of above formula
 
     mi_loss = torch.nn.KLDivLoss(reduction="none", log_target=True)(
-        logits_xy.view((-1)), # [C x C] -> [CC]
-        logits_p_x_p_y.view((-1)), # [C x C] -> [CC]
-    ).mean()
+        log_xy.view((-1)), # [C x C] -> [CC]
+        log_p_x_p_y.view((-1)), # [C x C] -> [CC]
+    ).sum()
     return mi_loss
 
 
