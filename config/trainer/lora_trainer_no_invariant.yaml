@@ -1,9 +1,7 @@
 
 metric: "accuracy"
-routing_weight: 1.5
-mutual_information_weight: 12.0
-invariant_prediction_weight: 1.0
-domain_prediction_weight: 1.0
+routing_weight: 0.5
+mutual_information_weight: 0.0
 training_arguments:
   output_dir: "fine-tuning-output"
   per_device_train_batch_size: 16

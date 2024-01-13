@@ -131,6 +131,8 @@ class ModularOutput(ModelOutput):
     probas: Optional[torch.FloatTensor] = None
     routing_loss: Optional[torch.FloatTensor] = None
     mi_loss: Optional[torch.FloatTensor] = None
+    invariant_loss: Optional[torch.FloatTensor] = None
+    domain_loss: Optional[torch.FloatTensor] = None
     invariant_logits: Optional[torch.FloatTensor] = None
     domain_logits: Optional[torch.FloatTensor] = None
     domain_weights: Optional[torch.FloatTensor] = None
@@ -297,18 +299,23 @@ class ModularModel(PreTrainedModel):
 
         probas = torch.softmax(logits, dim=-1)
 
-        loss = None
+        losses = [None] * 3
         if labels is not None: # from https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L1205
-            # Shift so that tokens < n predict n
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = torch.nn.CrossEntropyLoss()
-            shift_logits = shift_logits.view(-1, shift_logits.size(-1))
-            shift_labels = shift_labels.view(-1)
-            # Enable model parallelism
-            shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
+            for i, module_logits in enumerate([logits] + ([] if invariant_logits is None else [invariant_logits, aggregated_domain_logits])):
+                # Shift so that tokens < n predict n
+                shift_logits = module_logits[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
+                # Flatten the tokens
+                loss_fct = torch.nn.CrossEntropyLoss()
+                shift_logits = shift_logits.view(-1, shift_logits.size(-1))
+                shift_labels = shift_labels.view(-1)
+                # Enable model parallelism
+                shift_labels = shift_labels.to(shift_logits.device)
+                losses[i] = loss_fct(shift_logits, shift_labels)
+        
+        loss = losses[0]
+        invariant_loss = losses[1]
+        domain_loss = losses[2]
             
         # If use_cache is set to True, return past_key_values from all modules. Used in generate() to avoid recomputing the past_key_values at each generation step
         output_past_key_values = None if not use_cache else router_outputs.past_key_values + ((None,) * len(router_outputs.past_key_values) if invariant_logits is None else invariant_outputs.past_key_values) + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.past_key_values)
@@ -320,7 +327,7 @@ class ModularModel(PreTrainedModel):
         output_attentions = None if not output_attentions else router_outputs.attentions + ((None,) * len(router_outputs.attentions) if invariant_logits is None else invariant_outputs.attentions) + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.attentions)
 
         if not return_dict:
-            output = (logits, probas, routing_loss, mi_loss, invariant_logits, aggregated_domain_logits, domain_weights, output_past_key_values, output_hidden_states, output_attentions)
+            output = (logits, probas, routing_loss, mi_loss, invariant_loss, domain_loss, invariant_logits, aggregated_domain_logits, domain_weights, output_past_key_values, output_hidden_states, output_attentions)
             return (loss,) + output if loss is not None else output
 
         return ModularOutput(
@@ -328,6 +335,8 @@ class ModularModel(PreTrainedModel):
             probas=probas,
             routing_loss=routing_loss,
             mi_loss=mi_loss,
+            invariant_loss=invariant_loss,
+            domain_loss=domain_loss,
             invariant_logits=invariant_logits,
             domain_logits=aggregated_domain_logits,
             domain_weights=domain_weights,
