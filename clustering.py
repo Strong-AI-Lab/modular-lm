@@ -34,6 +34,8 @@ def main():
     parser.add_argument('--batch_size', type=int, default=8, help='Batch size for the model.')
     parser.add_argument('--router_config', type=str, default=None, help='Path to the router config file. If specified, the clusters will not be recomputed.')
     parser.add_argument('--saved_clusters_path', type=str, default=None, help='Path to the saved clusters. If specified, the clusters will not be recomputed.')
+    parser.add_argument('--hidden_level', type=int, default=-1, help='Level of the hidden state to use for the embeddings. If -1, the last hidden state will be used.')
+    parser.add_argument('--gpu', type=int, default=None, help='GPU to use. If None, CPU will be used.')
     args = parser.parse_args()
     
     # Load model config file
@@ -69,32 +71,41 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(model_config["model_path"], **model_config["model_config"])
     model.eval()
 
+    if args.gpu is not None:
+        device = torch.device(f"cuda:{args.gpu}")
+        model = model.to(device)
 
     # Compute the embeddings for each sample in the dataset using the loaded model
     embeddings = []
     batch = []
     if "dataset" in dataset[0]:
         gt_datasets = []
+        gt_batch = []
     else:
         gt_datasets = None
     for i in tqdm.trange(len(dataset)):
         batch.append(dataset[i]['text'])
         if gt_datasets is not None:
-            gt_datasets.append(int(dataset[i]['dataset']))
+            gt_batch.append(int(dataset[i]['dataset']))
 
         if len(batch) == args.batch_size:
             input_ids = tokenizer(batch, return_tensors='pt', padding="max_length", truncation=True, max_length=model_config["max_length"])
+            if args.gpu is not None:
+                input_ids = {key: value.to(device) for key, value in input_ids.items()}
             batch = []
 
             outputs = model(**input_ids, output_hidden_states=True)
-            outputs = outputs.hidden_states[-1].detach()
-            # outputs = outputs.sum(dim=1).numpy()
+            outputs = outputs.hidden_states[args.hidden_level].detach()
+            if args.gpu is not None:
+                outputs = outputs.cpu()
             outputs = outputs.numpy()
 
             if np.isnan(outputs).any():
                 print("NaN encountered in the embeddings. Skipping this batch. This can happen when the batch size is too large.")
             else:
                 embeddings.extend(outputs)
+                gt_datasets.extend(gt_batch)
+                gt_batch = []
 
     embeddings = np.array(embeddings)
 
@@ -124,7 +135,7 @@ def main():
         save_folder = f"cluster_results/{model_config['model_name']}_{data_config['dataset_name']}_{granularity}"
         save_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         os.makedirs(save_folder, exist_ok=True)
-        plt.savefig(f"{save_folder}/{save_time}_gt_datasets.png")
+        plt.savefig(f"{save_folder}/{save_time}_hl={str(args.hidden_level)}_gt_datasets.png")
 
 
     # Run the sklearn k-means algorithm on the embeddings
@@ -200,14 +211,14 @@ def main():
     save_folder = f"cluster_results/{model_config['model_name']}_{data_config['dataset_name']}_{granularity}"
     save_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     os.makedirs(save_folder, exist_ok=True)
-    plt.savefig(f"{save_folder}/{save_time}.png")
+    plt.savefig(f"{save_folder}/{save_time}_hl={str(args.hidden_level)}.png")
 
 
     # Save clustering models
     if args.saved_clusters_path is None:
-        os.makedirs(f"{save_folder}/{save_time}", exist_ok=True)
+        os.makedirs(f"{save_folder}/{save_time}_hl={str(args.hidden_level)}", exist_ok=True)
         for algo, name, n_clusters, n_mds in algos:
-            joblib.dump(algo, f"{save_folder}/{save_time}/{name}_{n_clusters}_mds={n_mds}.sav")
+            joblib.dump(algo, f"{save_folder}/{save_time}_hl={str(args.hidden_level)}/{name}_{n_clusters}_mds={n_mds}.sav")
 
 
 
