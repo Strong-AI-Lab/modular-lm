@@ -214,7 +214,8 @@ class ModularModel(PreTrainedModel):
             use_cache: Optional[bool] = None,
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
-            return_dict: Optional[bool] = None
+            return_dict: Optional[bool] = None,
+            dataset: Optional[torch.LongTensor] = None
             ):
         # if past_key_values is not None, estimate the division per modules
         if past_key_values is not None:

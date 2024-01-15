@@ -82,6 +82,7 @@ def main():
         tokenized = tokenizer(prompt, return_tensors="pt", padding="max_length", truncation=True, max_length=model_config["max_length"])
         tokenized["input_ids"] = tokenized["input_ids"].squeeze(0)
         tokenized["attention_mask"] = tokenized["attention_mask"].squeeze(0)
+        tokenized["dataset"] = torch.tensor(int(examples["dataset"]), dtype=torch.int64)
 
         tokenized["labels"] = tokenized["input_ids"].clone()
         if "labels" in examples:
