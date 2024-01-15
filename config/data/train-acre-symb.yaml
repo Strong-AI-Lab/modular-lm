@@ -3,4 +3,4 @@ dataset_name: "TRAIN_ACRE_SYMB"
 dataset_path: "../Logical-and-abstract-reasoning/data/ACRE/symbolic/IID/train.jsonl"
 evals: true
 dataset_config:
-  max_size: 9000
+  max_size: 1000

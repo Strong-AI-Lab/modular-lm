@@ -1,10 +1,10 @@
-router_name: "input-mds-kmeans-cluster"
+router_name: "input-mds-bisecting-kmeans-cluster"
 router_path: "MDSInputLevelCluster"
 pretrain_cluster: true
 pretrain_batch_size: 4
 routing_strategy:
-  clustering_algorithm: "K-Means"
+  clustering_algorithm: "Bisecting K-Means"
   num_embeddings: 2 # Must be equal to "nb_modules" in model config
   training_latents: null
-  reduction_components: 64
+  reduction_components: 16
   reduction_training_memory_size: 512

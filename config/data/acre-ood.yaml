@@ -1,0 +1,12 @@
+
+dataset_name: "ACRE_OOD"
+dataset_path: 
+   - "../Logical-and-abstract-reasoning/data/ACRE/text/IID/test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/ACRE/symbolic/IID/test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/ACRE/text/Comp/test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/ACRE/symbolic/Comp/test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/ACRE/text/Sys/test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/ACRE/symbolic/Sys/test.jsonl"
+evals: true
+dataset_config:
+  max_size: 1000

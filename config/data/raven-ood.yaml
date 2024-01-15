@@ -1,0 +1,12 @@
+
+dataset_name: "RAVEN_OOD"
+dataset_path: 
+   - "../Logical-and-abstract-reasoning/data/RAVEN/symbolic/center_single_test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/text/center_single_test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/symbolic/distribute_four.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/text/distribute_four.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/symbolic/in_center_single_out_center_single.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/text/in_center_single_out_center_single.jsonl"
+evals: true
+dataset_config:
+  max_size: 1000

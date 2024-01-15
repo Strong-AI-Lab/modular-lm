@@ -1,0 +1,6 @@
+
+dataset_name: "TRAIN_RAVEN_TXT"
+dataset_path: "../Logical-and-abstract-reasoning/data/RAVEN/text/center_single_train.jsonl"
+evals: true
+dataset_config:
+  max_size: 1000

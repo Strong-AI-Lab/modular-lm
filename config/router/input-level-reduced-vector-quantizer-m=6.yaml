@@ -1,0 +1,7 @@
+router_name: "input-reduced-vector-quantizer-m=6"
+router_path: "InputReductionQuantizer"
+routing_strategy:
+  num_embeddings: 6 # Must be equal to "nb_modules" in model config
+  embedding_dim: 2048 # TinyLLaMA embedding space = 2048; LLaMA2 embedding space = 4096
+  quantize_fn: "vector"
+  reduction_dim: 64
