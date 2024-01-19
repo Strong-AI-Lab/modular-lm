@@ -66,7 +66,7 @@ def main():
 
     # Load the tokenizer and model
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_path"], **model_config["tokenizer_config"])
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token = tokenizer.bos_token # for some reason, bos_token is needed to avoid getting NaNs, see: https://discuss.huggingface.co/t/llama2-pad-token-for-batched-inference/48020
 
     model = AutoModelForCausalLM.from_pretrained(model_config["model_path"], **model_config["model_config"])
     model.eval()
