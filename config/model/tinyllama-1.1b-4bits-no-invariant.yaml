@@ -5,6 +5,7 @@ model_config:
   load_in_4bit: True
 tokenizer_config:
   add_eos_token: true
+  padding_side: 'left'
 kwargs:
   nb_modules: 6 # Must be equal to "num_embeddings" in router config
   invariant_weight: 0.0

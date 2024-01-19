@@ -5,6 +5,7 @@ model_config:
   load_in_8bit: True # load_in_8bit does not work due to a bitsandbytes issue. see related topics: https://github.com/TimDettmers/bitsandbytes/issues/162, https://github.com/facebookresearch/llama/issues/423, https://github.com/huggingface/peft/issues/131, https://github.com/h2oai/h2ogpt/issues/962
 tokenizer_config:
   add_eos_token: true
+  padding_side: 'left'
 kwargs:
   nb_modules: 2 # Must be equal to "num_embeddings" in router config
   invariant_weight: 0.3
