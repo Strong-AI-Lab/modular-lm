@@ -4,7 +4,8 @@ from typing import Optional, Callable, Union, List, Tuple
 from dataclasses import dataclass
 
 from ..router.loader import load_router
-from ..loss.mi import batch_mutual_information_loss, mutual_random_reduce, mutual_max_reduce
+from ..loss.mi import batch_mutual_information_loss, REDUCTION_FUNCTIONS
+from .utils import BatchNormWeightedLogitAggregator
 
 import torch
 from transformers import PreTrainedModel, PretrainedConfig, AutoModelForCausalLM, AutoConfig, LlamaForCausalLM
@@ -164,12 +165,14 @@ class ModularModel(PreTrainedModel):
         self.mi_dim_reduction = config.mi_dim_reduction
         self.is_peft = config.is_peft
 
-        if config.mi_dim_reduce_method.lower() == "max":
-            self.mi_dim_reduction_method = mutual_max_reduce
-        elif config.mi_dim_reduce_method.lower() == "random":
-            self.mi_dim_reduction_method = mutual_random_reduce
-        else:
+        try:
+            self.mi_dim_reduction_layers = torch.nn.ModuleList()
+            for i in range(config.nb_modules):
+                self.mi_dim_reduction_layers.append(REDUCTION_FUNCTIONS[config.mi_dim_reduce_method.lower()](self.mi_dim_reduction))
+        except KeyError:
             raise ValueError(f"Invalid mutual information dimension reduction method {config.mi_dim_reduce_method}.")
+
+        self.logit_aggregation_layer = BatchNormWeightedLogitAggregator(self.config.vocab_size, eps=1.0)
 
 
         self.domain_models = torch.nn.ModuleList()
@@ -246,10 +249,11 @@ class ModularModel(PreTrainedModel):
                 inputs_embeds=inputs_embeds,
                 use_cache=use_cache,
                 output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
+                output_hidden_states=True,
             )
-            invariant_logits = self.dropout(invariant_outputs.logits)
+            invariant_logits = invariant_outputs.logits
             domain_device = invariant_logits.device
+            vocab_size = invariant_outputs.hidden_states[-1].size(-1)
         else:
             invariant_logits = None
             domain_device = router_outputs.hidden_states[-1].device
@@ -258,7 +262,6 @@ class ModularModel(PreTrainedModel):
         domain_outputs = []
         domain_logits = []
         mi_loss = 0.0
-        vocab_size = self.config.vocab_size
         for i, domain_model_i in enumerate(self.domain_models):
             domain_outputs_i = domain_model_i(
                 input_ids,
@@ -269,54 +272,50 @@ class ModularModel(PreTrainedModel):
                 inputs_embeds=inputs_embeds,
                 use_cache=use_cache,
                 output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
+                output_hidden_states=True,
             )
-            domain_logits_i = self.dropout(domain_outputs_i.logits)
+            domain_logits_i = domain_outputs_i.logits
             domain_logits_i = domain_logits_i.to(domain_device)
 
-            if invariant_logits is not None: # if invariant weight is non-zero, compute mutual information loss
-                reduced_invariant_logits, reduced_domain_logits_i = self.mi_dim_reduction_method(invariant_logits.view(-1, vocab_size), domain_logits_i.view(-1, vocab_size), self.mi_dim_reduction) # reduce the dimensionality of the logits to avoid memory overflow
-                mi_loss += batch_mutual_information_loss(reduced_invariant_logits, reduced_domain_logits_i) # compute mutual information loss
+            if invariant_logits is not None and labels is not None: # if invariant weight is non-zero, compute mutual information loss
+                ignore_indexes = labels.view(-1) != -100
+                reduced_invariant_hidden_states, reduced_domain_hidden_states_i = self.mi_dim_reduction_layers[i](
+                    invariant_outputs.hidden_states[-1].view(-1, vocab_size)[ignore_indexes], 
+                    domain_outputs_i.hidden_states[-1].view(-1, vocab_size)[ignore_indexes]) # reduce the dimensionality of the hidden states to avoid memory overflow
+                mi_loss += batch_mutual_information_loss(reduced_invariant_hidden_states, reduced_domain_hidden_states_i) # compute mutual information loss
             
             domain_outputs.append(domain_outputs_i)
             domain_logits.append(domain_logits_i)
 
-        domain_logits = torch.stack(domain_logits, dim=1)
-        domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if len(domain_weights.shape) < 3 else domain_weights.size(2), 1)).to(domain_device)
-        domain_probas = torch.softmax(domain_logits, dim=-1)
-        domain_costs = torch.sum(domain_logits.exp(), dim=-1).unsqueeze(-1) # Compute cost of each domain model
-        domain_logits = torch.log(((1 - domain_weights) / 2 + domain_probas * domain_weights).clamp(min=1e-6,max=1-1e-6)) + torch.log(domain_costs) # Multiply probas by weights (centered around zero) and convert back to logits, clamp to avoid NaNs
-        aggregated_domain_logits = torch.sum(domain_logits, dim=1) # Sum weighted logits from all modules
+        aggregated_domain_logits = torch.stack(domain_logits, dim=1)
 
         if invariant_logits is not None: # if invariant weight is non-zero, sum invariant logits with domain logits, otherwise only use domain logits
-            stacked_logits = torch.stack([invariant_logits, aggregated_domain_logits], dim=1)
-            probas = torch.softmax(stacked_logits, dim=-1)
-            costs = torch.sum(stacked_logits.exp(), dim=-1).unsqueeze(-1)
-            weights = torch.tensor([self.invariant_weight, 1 - self.invariant_weight], device=domain_device).view((1, 2, 1, 1))
-            logits = torch.log(((1 - weights) / 2 + probas * weights).clamp(min=1e-6,max=1-1e-6)) + torch.log(costs)
-            logits = torch.sum(logits, dim=1)
+            stacked_logits = torch.stack([invariant_logits] + domain_logits, dim=1)
+            token_level_weights = len(domain_weights.shape) > 2
+            domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if not token_level_weights else domain_weights.size(2), 1)).to(domain_device)
+            domain_weights = (1 - self.invariant_weight) * domain_weights
+            invariant_weights = torch.tensor([self.invariant_weight], device=domain_device).view((1, 1, 1, 1)).repeat((stacked_logits.size(0), 1, 1 if not token_level_weights else domain_weights.size(2), 1))
+            weights = torch.cat([invariant_weights, domain_weights], dim=1)
+            logits = self.logit_aggregation_layer(stacked_logits, weights)
         else:
-            logits = aggregated_domain_logits
+            domain_logits = torch.stack(domain_logits, dim=1)
+            domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if len(domain_weights.shape) < 3 else domain_weights.size(2), 1)).to(domain_device)
+            logits = self.logit_aggregation_layer(domain_logits, domain_weights)
 
         probas = torch.softmax(logits, dim=-1)
 
-        losses = [None] * 3
+        loss = None
         if labels is not None: # from https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L1205
-            for i, module_logits in enumerate([logits] + ([] if invariant_logits is None else [invariant_logits, aggregated_domain_logits])):
-                # Shift so that tokens < n predict n
-                shift_logits = module_logits[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous()
-                # Flatten the tokens
-                loss_fct = torch.nn.CrossEntropyLoss()
-                shift_logits = shift_logits.view(-1, shift_logits.size(-1))
-                shift_labels = shift_labels.view(-1)
-                # Enable model parallelism
-                shift_labels = shift_labels.to(shift_logits.device)
-                losses[i] = loss_fct(shift_logits, shift_labels)
-        
-        loss = losses[0]
-        invariant_loss = losses[1]
-        domain_loss = losses[2]
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100)
+            shift_logits = shift_logits.view(-1, shift_logits.size(-1))
+            shift_labels = shift_labels.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
             
         # If use_cache is set to True, return past_key_values from all modules. Used in generate() to avoid recomputing the past_key_values at each generation step
         output_past_key_values = None if not use_cache else router_outputs.past_key_values + ((None,) * len(router_outputs.past_key_values) if invariant_logits is None else invariant_outputs.past_key_values) + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.past_key_values)
@@ -328,7 +327,7 @@ class ModularModel(PreTrainedModel):
         output_attentions = None if not output_attentions else router_outputs.attentions + ((None,) * len(router_outputs.attentions) if invariant_logits is None else invariant_outputs.attentions) + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.attentions)
 
         if not return_dict:
-            output = (logits, probas, routing_loss, mi_loss, invariant_loss, domain_loss, invariant_logits, aggregated_domain_logits, domain_weights, output_past_key_values, output_hidden_states, output_attentions)
+            output = (logits, probas, routing_loss, mi_loss, invariant_logits, aggregated_domain_logits, domain_weights, output_past_key_values, output_hidden_states, output_attentions)
             return (loss,) + output if loss is not None else output
 
         return ModularOutput(
@@ -336,8 +335,6 @@ class ModularModel(PreTrainedModel):
             probas=probas,
             routing_loss=routing_loss,
             mi_loss=mi_loss,
-            invariant_loss=invariant_loss,
-            domain_loss=domain_loss,
             invariant_logits=invariant_logits,
             domain_logits=aggregated_domain_logits,
             domain_weights=domain_weights,

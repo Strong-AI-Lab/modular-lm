@@ -86,7 +86,7 @@ def main():
 
         tokenized["labels"] = tokenized["input_ids"].clone()
         if "labels" in examples:
-            label_len = len(tokenizer.encode(examples["labels"]))
+            label_len = len(tokenizer.encode(examples["labels"])) -1 # -1 because of the start token
             tokenized["labels"][:-label_len] = -100
         
         return tokenized
