@@ -98,11 +98,18 @@ def main():
             outputs = outputs.hidden_states[args.hidden_level].detach()
             if args.gpu is not None:
                 outputs = outputs.cpu()
-            outputs = outputs.numpy()
+            outputs = outputs.to(dtype=torch.float32).numpy()
 
             if np.isnan(outputs).any():
                 print("NaN encountered in the embeddings. Skipping this batch. This can happen when the batch size is too large.")
-            else:
+            else:    
+                if np.isinf(outputs).any():
+                    print("Inf encountered in the embeddings. Truncating.")
+                    np.clip(outputs, -1e4, 1e4, out=outputs)
+                elif np.abs(outputs).max() > 1e4:
+                    print("Large values encountered in the embeddings. Truncating.")
+                    np.clip(outputs, -1e4, 1e4, out=outputs)
+
                 embeddings.extend(outputs)
                 gt_datasets.extend(gt_batch)
                 gt_batch = []

@@ -53,6 +53,6 @@ python clustering.py config/model/<model_config>>.yaml config/data/<data_config>
 
 You can also visualise the clusters obtained with the router component of a modular model. To do so, you need to add the flag `--router_config <path_to_router_config>`, and optionally the flag `--saved_clusters_path <path_to_clusters>` if you want to use an existing save (most cases):
 ```
-python clustering.py config/model/<model_config>>.yaml config/data/<data_config>.yaml --batch_size <batch_size> --router_config config/router/<router_config>.yaml --saved_clusters_path <path_to_clusters>
+python clustering.py config/model/<model_config>.yaml config/data/<data_config>.yaml --batch_size <batch_size> --router_config config/router/<router_config>.yaml --saved_clusters_path <path_to_clusters>
 ```
 
