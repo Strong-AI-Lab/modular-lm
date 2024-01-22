@@ -2,6 +2,9 @@
 import torch
 
 
+def _no_reduce_func(logits_p : torch.Tensor, logits_q: torch.Tensor, remaining_dim : int): # convert tensors of size [B x C] to [B x C]
+    return logits_p, logits_q
+
 def _mutual_random_reduce_func(logits_p : torch.Tensor, logits_q: torch.Tensor, remaining_dim : int): # convert tensors of size [B x C] to [B x D] with D << C, select random subset of the dimensions
     dim_idx = torch.randperm(logits_p.shape[-1])[:remaining_dim]
     reduced_logits_p = logits_p[...,dim_idx]
@@ -56,6 +59,9 @@ def mutual_max_reduce(remaining_dim : int):
 def mutual_absmax_reduce(remaining_dim : int):
     return MutualReduce(_mutual_absmax_reduce_func, remaining_dim)
 
+def no_reduce(remaining_dim : int):
+    return MutualReduce(_no_reduce_func, remaining_dim)
+
 
 class MutualBatchNormReduce(MutualReduce):
     def __init__(self, reduce_func, remaining_dim : int):
@@ -79,14 +85,19 @@ def mutual_batchnorm_max_reduce(remaining_dim : int):
 def mutual_batchnorm_absmax_reduce(remaining_dim : int):
     return MutualBatchNormReduce(_mutual_absmax_reduce_func, remaining_dim)
 
+def batchnorm_no_reduce(remaining_dim : int):
+    return MutualBatchNormReduce(_no_reduce_func, remaining_dim)
+
 
 REDUCTION_FUNCTIONS = {
     "random" : mutual_random_reduce,
     "max" : mutual_max_reduce,
     "absmax" : mutual_absmax_reduce,
+    "no" : no_reduce,
     "batchnorm_random" : mutual_batchnorm_random_reduce,
     "batchnorm_max" : mutual_batchnorm_max_reduce,
     "batchnorm_absmax" : mutual_batchnorm_absmax_reduce,
+    "batchnorm_no" : batchnorm_no_reduce,
 }
 
 
