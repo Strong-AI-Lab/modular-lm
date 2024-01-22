@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from ..router.loader import load_router
 from ..loss.mi import batch_mutual_information_loss, REDUCTION_FUNCTIONS
-from .utils import BatchNormWeightedLogitAggregator
+from .aggregator import BatchNormWeightedLogitAggregator, WeightedLogitAggregator
 
 import torch
 from transformers import PreTrainedModel, PretrainedConfig, AutoModelForCausalLM, AutoConfig
