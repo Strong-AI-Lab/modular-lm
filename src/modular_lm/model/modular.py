@@ -240,6 +240,7 @@ class ModularModel(PreTrainedModel):
             output_attentions=output_attentions,
         )
         domain_weights, routing_loss = self.compute_weights(router_outputs.hidden_states[-1])
+        router_weights = domain_weights.detach().clone()
 
         # Compute invariant outputs
         if self.invariant_weight >= 1e-6: # compute invariant logits only if invariant weight is non-zero
@@ -336,7 +337,7 @@ class ModularModel(PreTrainedModel):
         output_attentions = None if not output_attentions else router_outputs.attentions + ((None,) * len(router_outputs.attentions) if invariant_logits is None else invariant_outputs.attentions) + tuple(values for domain_outputs_i in domain_outputs for values in domain_outputs_i.attentions)
 
         if not return_dict:
-            output = (logits, probas, routing_loss, mi_loss, invariant_loss, domain_loss, invariant_logits, aggregated_domain_logits, domain_weights, output_past_key_values, output_hidden_states, output_attentions)
+            output = (logits, probas, routing_loss, mi_loss, invariant_loss, domain_loss, invariant_logits, aggregated_domain_logits, router_weights, output_past_key_values, output_hidden_states, output_attentions)
             return (loss,) + output if loss is not None else output
 
         return ModularOutput(
@@ -348,7 +349,7 @@ class ModularModel(PreTrainedModel):
             domain_loss=domain_loss,
             invariant_logits=invariant_logits,
             domain_logits=aggregated_domain_logits,
-            domain_weights=domain_weights,
+            domain_weights=router_weights,
             loss=loss,
             past_key_values=output_past_key_values,
             hidden_states=output_hidden_states,

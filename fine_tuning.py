@@ -10,7 +10,7 @@ from src.modular_lm.trainer.routing_trainer import RoutingTrainer
 from src.modular_lm.data.dataset import ProxyDataset
 
 import torch
-from transformers import TrainingArguments, AutoModelForCausalLM, AutoTokenizer, PretrainedConfig
+from transformers import TrainingArguments, AutoTokenizer
 from datasets import load_dataset, Dataset
 import evaluate
 

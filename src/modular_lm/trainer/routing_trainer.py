@@ -1,5 +1,7 @@
+
 from torch import nn
-from transformers import Trainer
+from transformers import Trainer, AutoTokenizer
+import wandb
 
 
 class RoutingTrainer(Trainer):
@@ -9,6 +11,7 @@ class RoutingTrainer(Trainer):
         self.mutual_information_weight = mutual_information_weight
         self.invariant_prediction_weight = invariant_prediction_weight
         self.domain_prediction_weight = domain_prediction_weight
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model.config.base_model_path)
 
     def compute_loss(self, model, inputs, return_outputs=False):
         # compute outputs and self-supervised loss
@@ -90,5 +93,50 @@ class RoutingTrainer(Trainer):
             logs["domain_logits_amplitude"] = domain_logits.abs().mean().item()
 
         self.log(logs)
+
+        if "wandb" in self.args.report_to and "labels" in inputs:
+            labels_index = (inputs["labels"] != -100).sum(dim=-1).max().item()
+            labels = inputs["labels"][:,-labels_index:]
+            labels = self.tokenizer.batch_decode(labels, skip_special_tokens=False)
+
+            if logits is not None:
+                predictions = logits[:,-1-labels_index:-1].argmax(dim=-1) # shift logits to the left by one token to get the prediction
+                predictions = self.tokenizer.batch_decode(predictions, skip_special_tokens=False)
+            else:
+                predictions = [""] * len(labels)
+            if invariant_logits is not None:
+                invariant_predictions = invariant_logits[:,-1-labels_index:-1].argmax(dim=-1)
+                invariant_predictions = self.tokenizer.batch_decode(invariant_predictions, skip_special_tokens=False)
+            else:
+                invariant_predictions = [""] * len(labels)
+            if domain_logits is not None:
+                domain_predictions = domain_logits[:,-1-labels_index:-1].argmax(dim=-1)
+                domain_predictions = self.tokenizer.batch_decode(domain_predictions, skip_special_tokens=False)
+            else:
+                domain_predictions = [""] * len(labels)
+
+            table = wandb.Table(
+                columns=["labels", "prediction", "invariant prediction", "domain prediction"], 
+                data=[list(x) for x in zip(labels, predictions, invariant_predictions, domain_predictions)]
+            )
+            wandb.log({"predictions": table})
+
+        if "wandb" in self.args.report_to and "dataset" in inputs:
+            dataset = inputs["dataset"].tolist()
+
+            if isinstance(outputs, dict):
+                domain_weights = outputs.get("domain_weights")
+            elif len(outputs) >= 10:
+                domain_weights = outputs[9]
+            else:
+                domain_weights = None
+
+            if domain_weights is not None:
+                table = wandb.Table(
+                    columns=["dataset"] + [f"domain weight_{j}" for j in range(domain_weights.shape[1])], 
+                    data=[[str(dataset[i])] + [str(dw) for dw in domain_weights[i].tolist()] for i in range(domain_weights.shape[0])]
+                )
+                wandb.log({"domain weights": table})
+
 
         return (loss, outputs) if return_outputs else loss
