@@ -2,12 +2,14 @@
 metric: "accuracy"
 routing_weight: 0.25
 mutual_information_weight: 0.0
+invariant_prediction_weight: 0.0
+domain_prediction_weight: 0.0
 training_arguments:
   output_dir: "fine-tuning-output"
   per_device_train_batch_size: 16
   per_device_eval_batch_size: 16
   num_train_epochs: 3
-  learning_rate: 0.001
+  learning_rate: 0.0005
   report_to: "wandb"
   logging_steps: 500
 peft:

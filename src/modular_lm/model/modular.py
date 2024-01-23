@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from ..router.loader import load_router
 from ..loss.mi import batch_mutual_information_loss, REDUCTION_FUNCTIONS
-from .aggregator import BatchNormWeightedLogitAggregator, WeightedLogitAggregator
+from .aggregator import BatchNormWeightedLogitAggregator, WeightedLogitAggregator, WeightedProbaAggregator, BatchNormWeightedProbaAggregator
 
 import torch
 from transformers import PreTrainedModel, PretrainedConfig, AutoModelForCausalLM, AutoConfig
@@ -88,6 +88,7 @@ class ModularConfig(PretrainedConfig):
                  routing_strategy_name : Optional[str] = None,
                  routing_strategy_config : Optional[dict] = None,
                  routing_strategy_save : Optional[str] = None,
+                 aggregation_strategy : str = "norm_hidden_states",
                  nb_modules : int = 4, 
                  invariant_weight : float = 1.0, 
                  hidden_dropout_prob : float = 0.1, 
@@ -110,6 +111,7 @@ class ModularConfig(PretrainedConfig):
         self.routing_strategy_name = routing_strategy_name
         self.routing_strategy_config = routing_strategy_config
         self.routing_strategy_save = routing_strategy_save
+        self.aggregation_strategy = aggregation_strategy
 
         self._log_warnings(base_model_path, base_model_config, router_path, router_config, invariant_model_path, invariant_model_config, routing_strategy_name, routing_strategy_config, is_peft, peft_config)
         self._update_modules_from_base(router_path, router_config, invariant_model_path, invariant_model_config, **kwargs)
@@ -161,7 +163,6 @@ class ModularModel(PreTrainedModel):
     def __init__(self, config : PretrainedConfig):                
         super().__init__(config)
 
-        self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
         self.invariant_weight = config.invariant_weight
         self.nb_modules = config.nb_modules
         self.mi_dim_reduction = config.mi_dim_reduction
@@ -173,9 +174,51 @@ class ModularModel(PreTrainedModel):
                 self.mi_dim_reduction_layers.append(REDUCTION_FUNCTIONS[config.mi_dim_reduce_method.lower()](self.mi_dim_reduction))
         except KeyError:
             raise ValueError(f"Invalid mutual information dimension reduction method {config.mi_dim_reduce_method}.")
+        
+        aggregation_layers = []
+        if self.config.aggregation_strategy.endswith("logits") or self.config.aggregation_strategy.endswith("probas"):
+            if self.config.aggregation_strategy == "norm_logits":
+                self.logit_aggregation_layer = BatchNormWeightedLogitAggregator(self.config.vocab_size, eps=1.0)
+                self.domain_logit_aggregation_layer = BatchNormWeightedLogitAggregator(self.config.vocab_size, eps=1.0)
+            elif self.config.aggregation_strategy == "logits":
+                self.logit_aggregation_layer = WeightedLogitAggregator(eps=1.0)
+                self.domain_logit_aggregation_layer = WeightedLogitAggregator(eps=1.0)
+            elif self.config.aggregation_strategy == "norm_probas":
+                self.logit_aggregation_layer = BatchNormWeightedProbaAggregator(self.config.vocab_size, eps=1.0)
+                self.domain_logit_aggregation_layer = BatchNormWeightedProbaAggregator(self.config.vocab_size, eps=1.0)
+            elif self.config.aggregation_strategy == "probas":
+                self.logit_aggregation_layer = WeightedProbaAggregator(eps=1.0)
+                self.domain_logit_aggregation_layer = WeightedProbaAggregator(eps=1.0)
+            else:
+                raise ValueError(f"Invalid aggregation strategy {self.config.aggregation_strategy}.")
+            
+            aggregation_layers.append(self.logit_aggregation_layer)
+            aggregation_layers.append(self.domain_logit_aggregation_layer)
+        
+        elif self.config.aggregation_strategy.endswith("hidden_states"):
+            if self.config.aggregation_strategy == "norm_hidden_states":
+                self.domain_logit_aggregation_layer = WeightedLogitAggregator(eps=1.0)
+                self.domain_state_aggregation_layer = WeightedLogitAggregator(eps=1.0)
+                self.lm_bn = torch.nn.BatchNorm1d(2 * config.hidden_size)
+                self.lm_head = torch.nn.Linear(2 * config.hidden_size, config.vocab_size, bias=False)
+                
+                aggregation_layers.append(self.lm_bn)
 
-        self.logit_aggregation_layer = BatchNormWeightedLogitAggregator(self.config.vocab_size, eps=1.0)
-        self.domain_logit_aggregation_layer = BatchNormWeightedLogitAggregator(self.config.vocab_size, eps=1.0)
+            elif self.config.aggregation_strategy == "hidden_states":
+                self.domain_logit_aggregation_layer = WeightedLogitAggregator(eps=1.0)
+                self.domain_state_aggregation_layer = WeightedLogitAggregator(eps=1.0)
+                self.lm_head = torch.nn.Linear(2 * config.hidden_size, config.vocab_size, bias=False)
+            else:
+                raise ValueError(f"Invalid aggregation strategy {self.config.aggregation_strategy}.")
+            
+            aggregation_layers.append(self.domain_logit_aggregation_layer)
+            aggregation_layers.append(self.domain_state_aggregation_layer)
+            aggregation_layers.append(self.lm_head)
+            
+        else:
+            raise ValueError(f"Invalid aggregation strategy {self.config.aggregation_strategy}.")
+
+        self.aggregation_layers = torch.nn.ModuleList(aggregation_layers)
 
 
         self.domain_models = torch.nn.ModuleList()
@@ -257,7 +300,6 @@ class ModularModel(PreTrainedModel):
             )
             invariant_logits = invariant_outputs.logits
             domain_device = invariant_logits.device
-            vocab_size = invariant_outputs.hidden_states[-1].size(-1)
         else:
             invariant_logits = None
             domain_device = router_outputs.hidden_states[-1].device
@@ -265,6 +307,7 @@ class ModularModel(PreTrainedModel):
         # Compute domain outputs
         domain_outputs = []
         domain_logits = []
+        domain_hidden_states = []
         mi_loss = 0.0
         for i, domain_model_i in enumerate(self.domain_models):
             domain_outputs_i = domain_model_i(
@@ -284,28 +327,39 @@ class ModularModel(PreTrainedModel):
             if invariant_logits is not None and labels is not None: # if invariant weight is non-zero, compute mutual information loss
                 ignore_indexes = labels.view(-1) != -100
                 reduced_invariant_hidden_states, reduced_domain_hidden_states_i = self.mi_dim_reduction_layers[i](
-                    invariant_outputs.hidden_states[-1].view(-1, vocab_size)[ignore_indexes], 
-                    domain_outputs_i.hidden_states[-1].view(-1, vocab_size)[ignore_indexes]) # reduce the dimensionality of the hidden states to avoid memory overflow
+                    invariant_outputs.hidden_states[-1].view(-1, self.config.hidden_size)[ignore_indexes], 
+                    domain_outputs_i.hidden_states[-1].view(-1, self.config.hidden_size)[ignore_indexes]) # reduce the dimensionality of the hidden states to avoid memory overflow
                 mi_loss += batch_mutual_information_loss(reduced_invariant_hidden_states, reduced_domain_hidden_states_i) # compute mutual information loss
             
             domain_outputs.append(domain_outputs_i)
             domain_logits.append(domain_logits_i)
+            domain_hidden_states.append(domain_outputs_i.hidden_states[-1])
 
         token_level_weights = len(domain_weights.shape) > 2
         domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if not token_level_weights else domain_weights.size(2), 1)).to(domain_device)
         aggregated_domain_logits = torch.stack(domain_logits, dim=1)
         aggregated_domain_logits = self.domain_logit_aggregation_layer(aggregated_domain_logits, domain_weights)
 
-        if invariant_logits is not None: # if invariant weight is non-zero, sum invariant logits with domain logits, otherwise only use domain logits
-            stacked_logits = torch.stack([invariant_logits] + domain_logits, dim=1)
-            domain_weights = (1 - self.invariant_weight) * domain_weights
-            invariant_weights = torch.tensor([self.invariant_weight], device=domain_device).view((1, 1, 1, 1)).repeat((stacked_logits.size(0), 1, 1 if not token_level_weights else domain_weights.size(2), 1))
-            weights = torch.cat([invariant_weights, domain_weights], dim=1)
-            logits = self.logit_aggregation_layer(stacked_logits, weights)
-        else:
-            domain_logits = torch.stack(domain_logits, dim=1)
-            domain_weights = domain_weights.view((domain_weights.size(0), domain_weights.size(1), 1 if len(domain_weights.shape) < 3 else domain_weights.size(2), 1)).to(domain_device)
-            logits = self.logit_aggregation_layer(domain_logits, domain_weights)
+        if self.config.aggregation_strategy.endswith("hidden_states") and invariant_logits is not None: # Aggregate hidden states and compute logits
+            aggregated_domain_states = torch.stack(domain_hidden_states, dim=1)
+            aggregated_domain_states = self.domain_state_aggregation_layer(aggregated_domain_states, domain_weights)
+            
+            aggregated_states = torch.cat([invariant_outputs.hidden_states[-1], aggregated_domain_states], dim=-1)
+            if self.config.aggregation_strategy == "norm_hidden_states":
+                aggregated_states = aggregated_states.permute(0, 2, 1) # [batch_size, vocab_size, seq_len]
+                aggregated_states = self.lm_bn(aggregated_states)
+                aggregated_states = aggregated_states.permute(0, 2, 1) # [batch_size, seq_len, vocab_size]
+            logits = self.lm_head(aggregated_states)
+
+        elif invariant_logits is not None: # Aggregate and compute logits, if invariant weight is non-zero, sum invariant logits with domain logits
+                stacked_logits = torch.stack([invariant_logits] + domain_logits, dim=1)
+                domain_weights = (1 - self.invariant_weight) * domain_weights
+                invariant_weights = torch.tensor([self.invariant_weight], device=domain_device).view((1, 1, 1, 1)).repeat((stacked_logits.size(0), 1, 1 if not token_level_weights else domain_weights.size(2), 1))
+                weights = torch.cat([invariant_weights, domain_weights], dim=1)
+                logits = self.logit_aggregation_layer(stacked_logits, weights)
+
+        else: # Use only domain logits
+            logits = aggregated_domain_logits
 
         probas = torch.softmax(logits, dim=-1)
 
@@ -379,10 +433,26 @@ class ModularModel(PreTrainedModel):
         token: Optional[Union[str, bool]] = None,
         save_peft_format: bool = True,
         **kwargs):
-
+        
+        # Create save folder
         os.makedirs(save_directory, exist_ok=True)
+
+        # Save MI reduction layers
+        mi_reduction_directory = os.path.join(save_directory, "mi_reduction")
+        os.makedirs(mi_reduction_directory, exist_ok=True)
+        torch.save(self.mi_dim_reduction_layers.state_dict(), os.path.join(mi_reduction_directory, "mi_reduction.pt"))
+
+        # Save aggregation layers
+        aggregation_directory = os.path.join(save_directory, "aggregation")
+        os.makedirs(aggregation_directory, exist_ok=True)
+        torch.save(self.aggregation_layers.state_dict(), os.path.join(aggregation_directory, "aggregation.pt"))
+
+        # Save routing strategy
         routing_strategy_directory = os.path.join(save_directory, "routing_strategy")
         os.makedirs(routing_strategy_directory, exist_ok=True)
+        self.routing_strategy.save_strategy(routing_strategy_directory)
+
+        # Create save folders for LM modules
         router_directory = os.path.join(save_directory, "router")
         os.makedirs(router_directory, exist_ok=True)
         invariant_directory = os.path.join(save_directory, "invariant")
@@ -393,8 +463,7 @@ class ModularModel(PreTrainedModel):
             os.makedirs(domain_directory, exist_ok=True)
             domain_directories.append(domain_directory)
 
-        self.routing_strategy.save_strategy(routing_strategy_directory)
-
+        # Save LM modules
         self.router.save_pretrained(router_directory, is_main_process=is_main_process, state_dict=state_dict, save_function=save_function, push_to_hub=push_to_hub, max_shard_size=max_shard_size, safe_serialization=safe_serialization, variant=variant, token=token, save_peft_format=save_peft_format, **kwargs)
         self.invariant_model.save_pretrained(invariant_directory, is_main_process=is_main_process, state_dict=state_dict, save_function=save_function, push_to_hub=push_to_hub, max_shard_size=max_shard_size, safe_serialization=safe_serialization, variant=variant, token=token, save_peft_format=save_peft_format, **kwargs)
         for domain_model, domain_directory in zip(self.domain_models, domain_directories):
@@ -466,6 +535,16 @@ class ModularModel(PreTrainedModel):
 
         # Load model
         model = cls(config)
+
+        # Load MI reduction layers
+        mi_reduction_directory = os.path.join(pretrained_model_name_or_path, "mi_reduction")
+        if os.path.isdir(mi_reduction_directory):
+            model.mi_dim_reduction_layers.load_state_dict(torch.load(os.path.join(mi_reduction_directory, "mi_reduction.pt")))
+
+        # Load aggregation layers
+        aggregation_directory = os.path.join(pretrained_model_name_or_path, "aggregation")
+        if os.path.isdir(aggregation_directory):
+            model.aggregation_layers.load_state_dict(torch.load(os.path.join(aggregation_directory, "aggregation.pt")))
 
         # If path contains PEFT adapter saves, load them
         if os.path.isfile(os.path.join(router_directory, "adapter_config.json")):

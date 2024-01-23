@@ -1,28 +1,32 @@
 
+from typing import Callable
+
 import torch
 
 
-class WeightedLogitAggregator(torch.nn.Module):
+class WeightedAggregator(torch.nn.Module):
 
-    def __init__(self, eps : int = 1.0, **kwargs):
+    def __init__(self, func : Callable, eps : int = 1.0, **kwargs):
         super().__init__()
         self.eps = eps
+        self.func = func
 
     def forward(
         self,
         logits : torch.Tensor, # [batch_size, nb_modules, seq_len, vocab_size]
         weights : torch.Tensor # [batch_size, nb_modules, seq_len, vocab_size]
     ):
-        return _weighted_logit_aggregator_func(logits * self.eps, weights) / self.eps 
+        return self.func(logits * self.eps, weights) / self.eps 
 
 
-class BatchNormWeightedLogitAggregator(torch.nn.Module):
+class BatchNormWeightedAggregator(torch.nn.Module):
     
-    def __init__(self, num_embeddings : int, eps : int = 1.0, **kwargs):
+    def __init__(self, func : Callable, num_embeddings : int, eps : int = 1.0, **kwargs):
         super().__init__()
         self.num_embeddings = num_embeddings
         self.eps = eps
         self.bn = torch.nn.BatchNorm1d(num_embeddings)
+        self.func = func
 
     def forward(
         self,
@@ -36,8 +40,8 @@ class BatchNormWeightedLogitAggregator(torch.nn.Module):
         logits = logits.permute(0, 2, 1)
         logits = logits.view(logits_shape)
 
-        return _weighted_logit_aggregator_func(logits * self.eps, weights) / self.eps 
-
+        return self.func(logits * self.eps, weights) / self.eps
+    
 
 
 
@@ -56,3 +60,18 @@ def _weighted_logit_aggregator_func(logits : torch.Tensor, weights : torch.Tenso
     weighted_logits = torch.sum(weighted_logits, dim=1) # Sum weighted logits from all modules
 
     return weighted_logits
+
+
+
+
+def WeightedLogitAggregator(eps : int = 1.0, **kwargs):
+    return WeightedAggregator(_weighted_logit_aggregator_func, eps, **kwargs)
+
+def BatchNormWeightedLogitAggregator(num_embeddings : int, eps : int = 1.0, **kwargs):
+    return BatchNormWeightedAggregator(_weighted_logit_aggregator_func, num_embeddings, eps, **kwargs)
+
+def WeightedProbaAggregator(eps : int = 1.0, **kwargs):
+    return WeightedAggregator(_weighted_proba_aggregator_func, eps, **kwargs)
+
+def BatchNormWeightedProbaAggregator(num_embeddings : int, eps : int = 1.0, **kwargs):
+    return BatchNormWeightedAggregator(_weighted_proba_aggregator_func, num_embeddings, eps, **kwargs)
