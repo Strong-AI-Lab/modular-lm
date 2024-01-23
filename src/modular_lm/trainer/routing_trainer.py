@@ -95,22 +95,22 @@ class RoutingTrainer(Trainer):
         self.log(logs)
 
         if "wandb" in self.args.report_to and "labels" in inputs:
-            labels_index = (inputs["labels"] != -100).sum(dim=-1).max().item()
-            labels = inputs["labels"][:,-labels_index:]
+            labels_index = (inputs["labels"] != -100).sum(dim=-1).tolist()
+            labels = [label[-labels_index[i]:] for i, label in enumerate(inputs["labels"].tolist())]
             labels = self.tokenizer.batch_decode(labels, skip_special_tokens=False)
 
             if logits is not None:
-                predictions = logits[:,-1-labels_index:-1].argmax(dim=-1) # shift logits to the left by one token to get the prediction
+                predictions = [logits[i,-1-labels_index[i]:-1].argmax(dim=-1) for i in range(logits.shape[0])] # shift logits to the left by one token to get the prediction
                 predictions = self.tokenizer.batch_decode(predictions, skip_special_tokens=False)
             else:
                 predictions = [""] * len(labels)
             if invariant_logits is not None:
-                invariant_predictions = invariant_logits[:,-1-labels_index:-1].argmax(dim=-1)
+                invariant_predictions = [invariant_logits[i,-1-labels_index[i]:-1].argmax(dim=-1) for i in range(invariant_logits.shape[0])]
                 invariant_predictions = self.tokenizer.batch_decode(invariant_predictions, skip_special_tokens=False)
             else:
                 invariant_predictions = [""] * len(labels)
             if domain_logits is not None:
-                domain_predictions = domain_logits[:,-1-labels_index:-1].argmax(dim=-1)
+                domain_predictions = [domain_logits[i,-1-labels_index[i]:-1].argmax(dim=-1) for i in range(domain_logits.shape[0])]
                 domain_predictions = self.tokenizer.batch_decode(domain_predictions, skip_special_tokens=False)
             else:
                 domain_predictions = [""] * len(labels)
