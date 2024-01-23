@@ -6,9 +6,10 @@ tokenizer_config:
   add_eos_token: true
   padding_side: 'left'
 kwargs:
-  nb_modules: 6 # Must be equal to "num_embeddings" in router config
+  nb_modules: 2 # Must be equal to "num_embeddings" in router config
   hidden_dropout_prob: 0.1
   mi_dim_reduce_method: "no"
   aggregation_strategy : "norm_hidden_states"
+  hidden_size: 2048
 
   
