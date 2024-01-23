@@ -8,9 +8,8 @@ tokenizer_config:
   padding_side: 'left'
 kwargs:
   nb_modules: 6 # Must be equal to "num_embeddings" in router config
-  invariant_weight: 0.3
   hidden_dropout_prob: 0.1
-  mi_dim_reduction: 256
-  mi_dim_reduce_method: "max"
+  mi_dim_reduce_method: "no"
+  aggregation_strategy : "norm_hidden_states"
 
   
