@@ -6,3 +6,4 @@ fine-tuning-output/
 fine-tuning-saves/
 modular_lm.egg-info/
 wandb/
+inference-results/

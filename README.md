@@ -23,7 +23,7 @@ pip install -r requirements.txt
 
 ## Fine-Tuning
 
-To fine-tune a model, use the following components:
+To fine-tune a model, use the following command:
 ```
 python fine_tuning.py config/model/<model_name>.yaml config/router/<router_name>.yaml config/data/<data_name>.yaml config/trainer/<trainer_name>.yaml
 ```
@@ -33,10 +33,20 @@ By default, the resulting weights are stored in the folder `fine-tuning-saves`.
 ## Multi-GPU Fine-Tuning
 
 We allow multi-GPU fine-tuning using [deepsepeed](https://github.com/microsoft/DeepSpeed):
+```
+deepspeed --num_gpus <nb_gpus> fine_tuning.py config/model/<model_name>.yaml config/router/<router_name>.yaml config/data/<data_name>.yaml config/trainer/<trainer_name>.yaml --deepspeed config/trainer/deepspeed_config.json
+```
 
+
+
+## Evaluation
+
+To evaluate a trained model, use the following command:
 ```
-deepspeed --num_gpus <nb_gpus> fine_tuning.py config/model/<model_name>.yaml config/router/<router_name>.yaml config/data/<data_name>.yaml config/trainer/<trainer_name>.yaml --deepspeed config/trainer/deepspeed_config.yaml
+python run.py config/model/<model_name>.yaml config/data/<data_name>.yaml
 ```
+The model must be a Modular model and can be loaded like a regular transformers model (**not** compatible with `AutoModelForCausalLM`). The evaluation results are saved in the folder `inference-results`. Individual modules can also be used for inference with the flag `--module <module_name>`.
+
 
 
 ## Clusters Visualisation

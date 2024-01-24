@@ -91,7 +91,7 @@ def main():
         
         return tokenized
 
-    # Load evaluation dataset
+    # Load training dataset
     if "huggingface" in data_config and data_config["huggingface"]:
         dataset = load_dataset(data_config["dataset_path"], **data_config["dataset_config"])
     elif "evals" in data_config and data_config["evals"]:
