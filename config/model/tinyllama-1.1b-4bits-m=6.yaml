@@ -9,7 +9,7 @@ tokenizer_config:
 kwargs:
   nb_modules: 6 # Must be equal to "num_embeddings" in router config
   hidden_dropout_prob: 0.1
-  mi_dim_reduction : 1024
+  mi_dim_reduction : 512
   mi_dim_reduce_method : "absmax"
   aggregation_strategy : "norm_hidden_states"
   hidden_size: 2048
