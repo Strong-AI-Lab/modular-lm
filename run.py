@@ -65,7 +65,7 @@ def main():
             config = AutoConfig.from_pretrained(module_path)
             model = AutoModelForCausalLM.from_pretrained(module_path, config=config)
     else:
-        config = ModularConfig.from_pretrained(model_config["model_path"])
+        config = ModularConfig.from_pretrained(model_config["model_path"], **model_config["model_config"])
         model = ModularModel.from_pretrained(model_config["model_path"], config=config, **model_config["model_config"])
     
     model.eval()

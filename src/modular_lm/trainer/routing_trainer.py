@@ -27,6 +27,8 @@ class RoutingTrainer(Trainer):
             # compute mutual information loss
             if outputs.get("mi_loss") is not None:
                 mi_loss = outputs.get("mi_loss")
+            else:
+                mi_loss = 0.0
             # compute invariant loss
             if outputs.get("invariant_loss") is not None:
                 i_loss = outputs.get("invariant_loss")

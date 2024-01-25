@@ -159,6 +159,7 @@ class ModularModel(PreTrainedModel):
             model = prepare_model_for_kbit_training(model) # Add this for using int8
             model = get_peft_model(model, peft_config) # Add this for using PEFT
         return model
+    
 
     def __init__(self, config : PretrainedConfig):                
         super().__init__(config)
@@ -218,7 +219,7 @@ class ModularModel(PreTrainedModel):
         else:
             raise ValueError(f"Invalid aggregation strategy {self.config.aggregation_strategy}.")
 
-        self.aggregation_layers = torch.nn.ModuleList(aggregation_layers)
+        self.aggregation_layers = torch.nn.ModuleList(aggregation_layers) # for saving and loading
 
 
         self.domain_models = torch.nn.ModuleList()
@@ -498,7 +499,7 @@ class ModularModel(PreTrainedModel):
         config: Optional[Union[PretrainedConfig, str, os.PathLike]] = None,
         **kwargs):         
 
-        # Load or build config  
+        # Load or build config
         if config is None:
             config = ModularConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
         elif not isinstance(config, PretrainedConfig):
@@ -548,18 +549,15 @@ class ModularModel(PreTrainedModel):
 
         # If path contains PEFT adapter saves, load them
         if os.path.isfile(os.path.join(router_directory, "adapter_config.json")):
-            model.router = prepare_model_for_kbit_training(model.router)
             model.router = PeftModel.from_pretrained(model.router, router_directory)
             model.router = model.router.merge_and_unload()
 
         if os.path.isfile(os.path.join(invariant_directory, "adapter_config.json")):
-            model.invariant_model = prepare_model_for_kbit_training(model.invariant_model)
             model.invariant_model = PeftModel.from_pretrained(model.invariant_model, invariant_directory)
             model.invariant_model = model.invariant_model.merge_and_unload()
 
         for i in range(config.nb_modules):
             if os.path.isfile(os.path.join(domain_directories[i], "adapter_config.json")):
-                model.domain_models[i] = prepare_model_for_kbit_training(model.domain_models[i])
                 model.domain_models[i] = PeftModel.from_pretrained(model.domain_models[i], domain_directories[i])
                 model.domain_models[i] = model.domain_models[i].merge_and_unload()
 
