@@ -23,8 +23,10 @@ CLUSTERING_ALGORITHMS = {
 class Cluster(torch.nn.Module):
 
     @staticmethod
-    def load_cluster(save_path : str, num_embeddings: int):
+    def load_cluster(save_path : str, num_embeddings: int, allow_different_centroid_number : bool = False):
         clustering_algorithm = joblib.load(save_path)
+        if allow_different_centroid_number:
+            raise NotImplementedError("Not implemented yet. Please use allow_different_centroid_number=False")
         return Cluster(clustering_algorithm, num_embeddings)
 
     def __init__(self, clustering_algorithm : Union[str,_BaseKMeans], num_embeddings: int, training_latents: Optional[torch.Tensor] = None):
@@ -64,8 +66,8 @@ class TokenLevelCluster(Cluster, TokenLevelRouting):
     def save_strategy(self, path: str):
         self.save_cluster(os.path.join(path, "clusters.sav"))
 
-    def load_strategy(self, path: str):
-        self.clustering_algorithm = Cluster.load_cluster(os.path.join(path, "clusters.sav"), self.num_embeddings).clustering_algorithm
+    def load_strategy(self, path: str, allow_different_centroid_number : bool = False):
+        self.clustering_algorithm = Cluster.load_cluster(os.path.join(path, "clusters.sav"), self.num_embeddings, allow_different_centroid_number).clustering_algorithm
     
 
 class DiffTokenLevelCluster(TokenLevelCluster):
@@ -96,8 +98,8 @@ class InputLevelCluster(Cluster, InputLevelRouting):
     def save_strategy(self, path: str):
         self.save_cluster(os.path.join(path, "clusters.sav"))
 
-    def load_strategy(self, path: str):
-        self.clustering_algorithm = Cluster.load_cluster(os.path.join(path, "clusters.sav"), self.num_embeddings).clustering_algorithm
+    def load_strategy(self, path: str, allow_different_centroid_number : bool = False):
+        self.clustering_algorithm = Cluster.load_cluster(os.path.join(path, "clusters.sav"), self.num_embeddings, allow_different_centroid_number).clustering_algorithm
     
 
 class DiffInputLevelCluster(InputLevelCluster):
@@ -142,8 +144,8 @@ class MDSInputLevelCluster(Cluster, InputLevelRouting):
         self.save_cluster(os.path.join(path, "clusters.sav"))
         np.save(os.path.join(path, "reduction_training_memory.npy"), self.reduction_training_memory)
 
-    def load_strategy(self, path: str):
-        self.clustering_algorithm = Cluster.load_cluster(os.path.join(path, "clusters.sav"), self.num_embeddings).clustering_algorithm
+    def load_strategy(self, path: str, allow_different_centroid_number : bool = False):
+        self.clustering_algorithm = Cluster.load_cluster(os.path.join(path, "clusters.sav"), self.num_embeddings, allow_different_centroid_number).clustering_algorithm
         self.reduction_training_memory = np.load(os.path.join(path, "reduction_training_memory.npy"))
 
         if self.reduction_training_memory_size is None or self.reduction_training_memory_size > len(self.reduction_training_memory):

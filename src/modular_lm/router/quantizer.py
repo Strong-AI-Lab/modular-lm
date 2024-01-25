@@ -8,6 +8,28 @@ import torch
 import torch.nn.functional as F
 
 
+def load_weights_if_allowed(path: str, weights: torch.Tensor, allow_different_centroid_number : bool = False):
+    loaded_weights = torch.load(os.path.join(path, "embeddings.pt"))
+
+    if weights.shape != loaded_weights.shape:
+        if allow_different_centroid_number:
+            if weights.shape[1] != loaded_weights.shape[1]:
+                raise ValueError(f"Loaded embedding dimension {loaded_weights.shape[1]} does not match current embedding dimension {weights.shape[1]}")
+            elif weights.shape[0] < loaded_weights.shape[0]:
+                raise ValueError(f"Number of centroids in the loaded embedding shape {loaded_weights.shape[0]} is larger than current number of centroids {weights.shape[0]}")
+            else:
+                weights[:loaded_weights.shape[0]] = loaded_weights
+                print(f"Warning! Loaded router embeddings shape {loaded_weights.shape} does not match current router embedding shape {weights.shape}. Only the first {loaded_weights.shape[0]} centroids are loaded.")
+
+        else:
+            raise ValueError(f"Loaded embedding shape {loaded_weights.shape} does not match current embedding shape {weights.shape}")
+        
+    else:
+        weights = loaded_weights
+    
+    return weights
+
+
 class TokenQuantizer(TokenLevelRouting):
     """
     Reference:
@@ -85,8 +107,8 @@ class TokenQuantizer(TokenLevelRouting):
     def save_strategy(self, path: str):
         torch.save(self.embedding.weight.data, os.path.join(path, "embeddings.pt"))
 
-    def load_strategy(self, path: str):
-        self.embedding.weight.data = torch.load(os.path.join(path, "embeddings.pt"))
+    def load_strategy(self, path: str, allow_different_centroid_number : bool = False):
+        self.embedding.weight.data = load_weights_if_allowed(path, self.embedding.weight.data, allow_different_centroid_number)
 
 
 
@@ -120,8 +142,8 @@ class TokenReductionQuantizer(TokenQuantizer):
         super().save_strategy(path)
         torch.save(self.projector.state_dict(), os.path.join(path, "projector.pt"))
     
-    def load_strategy(self, path: str):
-        super().load_strategy(path)
+    def load_strategy(self, path: str, allow_different_centroid_number : bool = False):
+        super().load_strategy(path, allow_different_centroid_number)
         self.projector.load_state_dict(torch.load(os.path.join(path, "projector.pt")))
 
 
@@ -197,8 +219,8 @@ class InputQuantizer(InputLevelRouting):
     def save_strategy(self, path: str):
         torch.save(self.embedding.weight.data, os.path.join(path, "embeddings.pt"))
 
-    def load_strategy(self, path: str):
-        self.embedding.weight.data = torch.load(os.path.join(path, "embeddings.pt"))
+    def load_strategy(self, path: str, allow_different_centroid_number : bool = False):
+        self.embedding.weight.data = load_weights_if_allowed(path, self.embedding.weight.data, allow_different_centroid_number)
     
 
 
@@ -232,8 +254,8 @@ class InputReductionQuantizer(InputQuantizer):
         super().save_strategy(path)
         torch.save(self.projector.state_dict(), os.path.join(path, "projector.pt"))
     
-    def load_strategy(self, path: str):
-        super().load_strategy(path)
+    def load_strategy(self, path: str, allow_different_centroid_number : bool = False):
+        super().load_strategy(path, allow_different_centroid_number)
         self.projector.load_state_dict(torch.load(os.path.join(path, "projector.pt")))
 
 

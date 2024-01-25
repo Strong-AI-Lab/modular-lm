@@ -13,7 +13,7 @@ class RoutingStrategy(torch.nn.Module):
     def save_strategy(self, path: str):
         raise NotImplementedError("Abstract method")
     
-    def load_strategy(self, path: str):
+    def load_strategy(self, path: str, allow_different_centroid_number : bool = False):
         raise NotImplementedError("Abstract method")
     
 
