@@ -1,4 +1,5 @@
 
+import torch
 from torch import nn
 from transformers import Trainer, AutoTokenizer
 import wandb
@@ -78,12 +79,12 @@ class RoutingTrainer(Trainer):
         loss = s_loss + self.routing_weight * r_loss + self.mutual_information_weight * mi_loss + self.invariant_prediction_weight * i_loss + self.domain_prediction_weight * d_loss
         
         logs = {
-            "loss": loss.item(),
-            "supervised_loss": s_loss.item(),
-            "routing_loss": (self.routing_weight * r_loss).item(),
-            "mutual_information_loss": (self.mutual_information_weight * mi_loss).item(),
-            "invariant_loss": (self.invariant_prediction_weight * i_loss).item(),
-            "domain_loss": (self.domain_prediction_weight * d_loss).item(),
+            "loss": loss.item() if isinstance(loss, torch.Tensor) else loss,
+            "supervised_loss": s_loss.item() if isinstance(s_loss, torch.Tensor) else s_loss,
+            "routing_loss": (self.routing_weight * r_loss).item() if isinstance(r_loss, torch.Tensor) else (self.routing_weight * r_loss),
+            "mutual_information_loss": (self.mutual_information_weight * mi_loss).item() if isinstance(mi_loss, torch.Tensor) else (self.mutual_information_weight * mi_loss),
+            "invariant_loss": (self.invariant_prediction_weight * i_loss).item() if isinstance(i_loss, torch.Tensor) else (self.invariant_prediction_weight * i_loss),
+            "domain_loss": (self.domain_prediction_weight * d_loss).item() if isinstance(d_loss, torch.Tensor) else (self.domain_prediction_weight * d_loss),
         }
         if logits is not None:
             logs["logits_amplitude"] = logits.abs().mean().item()

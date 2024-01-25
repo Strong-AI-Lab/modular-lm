@@ -308,7 +308,7 @@ class ModularModel(PreTrainedModel):
         domain_outputs = []
         domain_logits = []
         domain_hidden_states = []
-        mi_loss = 0.0
+        mi_loss = None if invariant_logits is None else 0.0
         for i, domain_model_i in enumerate(self.domain_models):
             domain_outputs_i = domain_model_i(
                 input_ids,
