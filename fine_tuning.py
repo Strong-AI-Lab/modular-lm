@@ -4,6 +4,7 @@ import numpy as np
 import yaml
 import datetime
 import tqdm
+from typing import Optional
 
 from src.modular_lm.model.modular import ModularModel, ModularConfig
 from src.modular_lm.trainer.routing_trainer import RoutingTrainer
@@ -73,20 +74,30 @@ def main():
     
     tokenizer = AutoTokenizer.from_pretrained(model_config["model_path"], **model_config["tokenizer_config"])
     tokenizer.pad_token = tokenizer.eos_token
-    def tokenize_function(examples): # Non-batched tokenizer
-        if "labels" in examples:
-            prompt = examples["text"] + examples["labels"]
+    def tokenize_function(examples, text_id : str = "text", label_id : str = "labels", dataset_id : str = "dataset", dataset_list : Optional[list] = None): # Non-batched tokenizer
+        if label_id in examples:
+            prompt = examples[text_id] + str(examples[label_id])
         else:
-            prompt = examples["text"]
+            prompt = examples[text_id]
+
+        # Print warning if input is too long
+        l = len(tokenizer.encode(prompt))
+        if l > model_config["max_length"]:
+            print(f"Input is too long: {l}. Truncating to {model_config['max_length']} tokens.")
         
         tokenized = tokenizer(prompt, return_tensors="pt", padding="max_length", truncation=True, max_length=model_config["max_length"])
         tokenized["input_ids"] = tokenized["input_ids"].squeeze(0)
         tokenized["attention_mask"] = tokenized["attention_mask"].squeeze(0)
-        tokenized["dataset"] = torch.tensor(int(examples["dataset"]), dtype=torch.int64)
+
+        if dataset_id in examples:
+            if dataset_list is None:
+                tokenized["dataset"] = torch.tensor(int(examples[dataset_id]), dtype=torch.int64)
+            else:
+                tokenized["dataset"] = torch.tensor(dataset_list.index(examples[dataset_id]), dtype=torch.int64)
 
         tokenized["labels"] = tokenized["input_ids"].clone()
-        if "labels" in examples:
-            label_len = len(tokenizer.encode(examples["labels"])) -1 # -1 because of the start token
+        if label_id in examples:
+            label_len = len(tokenizer.encode(str(examples[label_id]))) -1 # -1 because of the start token
             tokenized["labels"][:-label_len] = -100
         
         return tokenized
@@ -94,14 +105,19 @@ def main():
     # Load training dataset
     if "huggingface" in data_config and data_config["huggingface"]:
         dataset = load_dataset(data_config["dataset_path"], **data_config["dataset_config"])
+        if "column_mappings" in data_config:
+            ground_tokenize_function = lambda x : tokenize_function(x, **data_config["column_mappings"])
+        else:
+            ground_tokenize_function = tokenize_function
     elif "evals" in data_config and data_config["evals"]:
         dataset = Dataset.from_generator(ProxyDataset(data_config["dataset_path"], **data_config["dataset_config"]).generator)
+        ground_tokenize_function = tokenize_function
         
     dataset = dataset.train_test_split(test_size=0.2, shuffle=True, seed=42)
     train_dataset = dataset["train"]
-    train_dataset = train_dataset.map(tokenize_function, batched=False)
+    train_dataset = train_dataset.map(ground_tokenize_function, batched=False)
     eval_dataset = dataset["test"]
-    eval_dataset = eval_dataset.map(tokenize_function, batched=False)
+    eval_dataset = eval_dataset.map(ground_tokenize_function, batched=False)
 
 
     # If using clustering router, learn clusters first

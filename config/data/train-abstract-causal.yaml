@@ -1,0 +1,7 @@
+dataset_name: "ABSTRACT_CAUSAL"
+dataset_path: 
+   - "../Logical-and-abstract-reasoning/data/ACRE/symbolic/IID/test.jsonl"
+   - "../Logical-and-abstract-reasoning/data/CORR2CAUSE/train-corr2cause.jsonl"
+evals: true
+dataset_config:
+  max_size: 1000

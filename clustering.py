@@ -76,17 +76,28 @@ def main():
         model = model.to(device)
 
     # Compute the embeddings for each sample in the dataset using the loaded model
+    if "column_mappings" in data_config:
+        if "text_id" in data_config["column_mappings"]:
+            text_id = data_config["column_mappings"]["text_id"]
+        if "dataset_id" in data_config["column_mappings"]:
+            dataset_id = data_config["column_mappings"]["dataset_id"]
+    else:
+        text_id = "text"
+        dataset_id = "dataset"
     embeddings = []
     batch = []
-    if "dataset" in dataset[0]:
+    if dataset_id in dataset[0]:
         gt_datasets = []
         gt_batch = []
     else:
         gt_datasets = None
     for i in tqdm.trange(len(dataset)):
-        batch.append(dataset[i]['text'])
+        batch.append(dataset[i][text_id])
         if gt_datasets is not None:
-            gt_batch.append(int(dataset[i]['dataset']))
+            if "column_mappings" in data_config and "dataset_list" in data_config["column_mappings"]:
+                gt_batch.append(data_config["column_mappings"]["dataset_list"].index(dataset[i][dataset_id]))
+            else:
+                gt_batch.append(int(dataset[i][dataset_id]))
 
         if len(batch) == args.batch_size:
             input_ids = tokenizer(batch, return_tensors='pt', padding="max_length", truncation=True, max_length=model_config["max_length"])

@@ -1,9 +1,10 @@
-model_name: "modular-llama2-7b-4bits-acre"
+model_name: "modular-llama2-7b-acre"
 model_path: "fine-tuning-saves/fine-tuned-llama2-7b-4bits-input-reduced-vector-quantizer-TRAIN_ACRE_TASKS-2024-XX-XX_XX-XX-XX/"
 max_length: 512
 model_config:
   base_model_config: 
     load_in_4bit: false
+    device_map: "auto"
 tokenizer_config:
   add_eos_token: false
   padding_side: 'left'

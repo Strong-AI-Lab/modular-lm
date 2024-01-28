@@ -1,0 +1,16 @@
+dataset_name: "corr2cause"
+dataset_path: "causalnlp/corr2cause"
+huggingface: true
+dataset_config:
+  split: "test[:640]" # do not use samples with 6 variables for memory reasons
+column_mappings:
+  text_id: "input"
+  label_id: "label"
+  dataset_id: "template"
+  dataset_list:
+    - "has_collider"
+    - "has_confounder"
+    - "parent"
+    - "non-parent ancestor"
+    - "child"
+    - "non-child descendant"

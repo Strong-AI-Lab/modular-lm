@@ -8,6 +8,7 @@ import pandas as pd
 import datetime
 import json
 
+import torch
 from torch.utils.data import DataLoader
 
 from src.modular_lm.model.modular import ModularModel, ModularConfig
@@ -34,6 +35,7 @@ def main():
     parser.add_argument("--module", type=str, default=None, help="If specified, evaluate a specific module within the Modular model. Options: 'router', 'invariant', 'domain_{i}' Provide the module number you want instead of the `i`.")
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--gpu", type=str, default=None)
     args = parser.parse_args()
     
     # Load model config file
@@ -67,6 +69,9 @@ def main():
     else:
         config = ModularConfig.from_pretrained(model_config["model_path"], **model_config["model_config"])
         model = ModularModel.from_pretrained(model_config["model_path"], config=config, **model_config["model_config"])
+
+    if args.gpu is not None:
+        model = model.to(args.gpu)
     
     model.eval()
     
@@ -93,24 +98,39 @@ def main():
 
         results = []
         for i in range(len(label)):
-            metrics = {"label" : label[i], "prediction" : prediction[i]}
+
+            metrics = {"label" : str(label[i]), "prediction" : prediction[i]}
             for metric_name, metric_function in METRICS.items():
-                metrics[metric_name] = metric_function(prediction[i], label[i])
+                metrics[metric_name] = metric_function(prediction[i], str(label[i]))
             results.append(metrics)
         return results
 
 
     # Evaluate model
+    if "column_mappings" in data_config:
+        if "text_id" in data_config["column_mappings"]:
+            text_id = data_config["column_mappings"]["text_id"]
+        if "label_id" in data_config["column_mappings"]:
+            label_id = data_config["column_mappings"]["label_id"]
+    else:
+        text_id = "text"
+        label_id = "labels"
     nb_lines = len(loader) if args.limit is None else min(len(loader), int(args.limit))
     results = []
     for i, line in tqdm.tqdm(enumerate(loader), total=nb_lines):
-        input, label = line["text"], line["labels"]
+        input, label = line[text_id], line[label_id]
         input = tokenizer(input, return_tensors="pt", padding=True)["input_ids"]
+
+        if args.gpu is not None:
+            input = input.to(args.gpu)
 
         tokenized_response = model.generate(input, max_new_tokens=model_config["max_length"]-input.shape[1])
         tokenized_response = [tokenized_response[i][len(input[i]):] for i in range(len(tokenized_response))]
         response = tokenizer.batch_decode(tokenized_response, skip_special_tokens=True)
         
+        if isinstance(label, torch.Tensor):
+            label = label.tolist()
+
         results += compute_metrics(response, label)
         
         if args.limit is not None and i >= args.limit:
@@ -126,6 +146,23 @@ def main():
     # Print summary
     print(f"Results saved to {save_path}")
     print(*[f"{metric} : {df[metric].mean()}" for metric in METRICS.keys()], sep="\n")
+
+    if df.label.unique().tolist() == [0, 1] or df.label.unique().tolist() == ['0', '1']: # compute binary metrics if binary output
+        df.label = df.label.map(int)
+        df.prediction = df.prediction.map(int)
+
+        true_positives = len(df[(df.label == 1) & (df.prediction == 1)])
+        true_negatives = len(df[(df.label == 0) & (df.prediction == 0)])
+        false_positives = len(df[(df.label == 0) & (df.prediction == 1)])
+        false_negatives = len(df[(df.label == 1) & (df.prediction == 0)])
+        f1 = 2 * true_positives / (2 * true_positives + false_positives + false_negatives)
+        total = len(df)
+
+        print(f"True positives : {true_positives}")
+        print(f"True negatives : {true_negatives}")
+        print(f"False positives : {false_positives}")
+        print(f"False negatives : {false_negatives}")
+        print(f"F1 : {f1}")
 
 
 if __name__ == "__main__":
