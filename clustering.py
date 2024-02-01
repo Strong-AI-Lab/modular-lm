@@ -13,6 +13,7 @@ from src.modular_lm.data.dataset import ProxyDataset
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, DataCollatorForLanguageModeling
 from datasets import load_dataset, Dataset
+from peft import PeftModel
 
 from sklearn.cluster import BisectingKMeans, KMeans
 from sklearn.manifold import MDS
@@ -35,7 +36,7 @@ def main():
     parser.add_argument('--router_config', type=str, default=None, help='Path to the router config file. If specified, the clusters will not be recomputed.')
     parser.add_argument('--saved_clusters_path', type=str, default=None, help='Path to the saved clusters. If specified, the clusters will not be recomputed.')
     parser.add_argument('--hidden_level', type=int, default=-1, help='Level of the hidden state to use for the embeddings. If -1, the last hidden state will be used.')
-    parser.add_argument('--gpu', type=int, default=None, help='GPU to use. If None, CPU will be used.')
+    parser.add_argument('--gpu', type=str, default=None, help='GPU to use. If None, CPU will be used.')
     args = parser.parse_args()
     
     # Load model config file
@@ -69,10 +70,13 @@ def main():
     tokenizer.pad_token = tokenizer.bos_token # for some reason, bos_token is needed to avoid getting NaNs, see: https://discuss.huggingface.co/t/llama2-pad-token-for-batched-inference/48020
 
     model = AutoModelForCausalLM.from_pretrained(model_config["model_path"], **model_config["model_config"])
+    if "peft" in model_config:
+            model = PeftModel.from_pretrained(model, model_config["peft"])
+            model = model.merge_and_unload()
     model.eval()
 
     if args.gpu is not None:
-        device = torch.device(f"cuda:{args.gpu}")
+        device = torch.device(args.gpu)
         model = model.to(device)
 
     # Compute the embeddings for each sample in the dataset using the loaded model
@@ -169,8 +173,13 @@ def main():
                 labels = labels.reshape(-1, labels.shape[-1])
 
             labels = labels.argmax(-1).detach().cpu().numpy()
-            centers = algo.clustering_algorithm.cluster_centers_
+            # centers = algo.clustering_algorithm.cluster_centers_
 
+            # if "mds" in router_config['router_name']:
+            #     center_embeddings = np.concatenate((algo.reduction_training_memory, torch.as_tensor(mds_embeddings, dtype=torch.float32)), axis=0)
+            #     center_embeddings = algo.dim_reduction.fit_transform(center_embeddings.astype(np.float64))[algo.reduction_training_memory_size:]
+            # else:
+            #     center_embeddings = mds_embeddings
         elif router_config['router_name'].endswith("-quantizer"): # save from torch routing model
             labels, _ = algo(torch.as_tensor(embeddings, dtype=torch.float32))
 
@@ -178,19 +187,36 @@ def main():
                 labels = labels.reshape(-1, labels.shape[1])
 
             labels = labels.argmax(-1).detach().cpu().numpy()
-            centers = algo.embedding.weight.detach().cpu().numpy()
+            # centers = algo.embedding.weight.detach().cpu().numpy()
+            
+            # if "reduced" in router_config['router_name']:
+            #     center_embeddings = algo.projector(torch.as_tensor(mds_embeddings, dtype=torch.float32)).detach().cpu().numpy()
+            # else:
+            #     center_embeddings = mds_embeddings
         else:
             raise ValueError(f"Unknown router name: {router_config['router_name']}")
 
         project = MDS(n_components=2)
         projection = project.fit_transform(mds_embeddings)
-        centers = project.fit_transform(np.concatenate((centers, mds_embeddings)))[-len(centers):] # /!\ this is an approximation of the position of the centers in the projected data space. there are no transform method for MDS. for more information, see: https://github.com/scikit-learn/scikit-learn/pull/16088 https://github.com/scikit-learn/scikit-learn/issues/15808
+        # centers = project.fit_transform(np.concatenate((centers, center_embeddings)))[-len(centers):] # /!\ this is an approximation of the position of the centers in the projected data space. there are no transform method for MDS. for more information, see: https://github.com/scikit-learn/scikit-learn/pull/16088 https://github.com/scikit-learn/scikit-learn/issues/15808
 
         # create single plot figure
         fig, axs = plt.subplots(1, 1, figsize=(9, 8))
         axs.scatter(projection[:, 0], projection[:, 1], s=10, c=labels)
-        axs.scatter(centers[:, 0], centers[:, 1], c="r", s=20)
+        # axs.scatter(centers[:, 0], centers[:, 1], c="r", s=20)
         axs.set_title(f"{router_config['router_name']} : {router_config['routing_strategy']['num_embeddings']} clusters")
+
+        
+        # Compute alignment between the clusters and the ground truth datasets
+        if gt_datasets is not None:
+            gt_values = set(gt_datasets)
+            algo_values = set(labels)
+
+            alignment_table = np.zeros((len(gt_values),len(algo_values)))
+            for i in range(len(gt_datasets)):
+                alignment_table[gt_datasets[i],labels[i]] += 1
+            alignment_table /= alignment_table.sum(axis=1, keepdims=True)
+
 
     else: # no saves or custom save from previous clustering.py run
         n_mds = 2
@@ -230,6 +256,10 @@ def main():
     save_time = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     os.makedirs(save_folder, exist_ok=True)
     plt.savefig(f"{save_folder}/{save_time}_hl={str(args.hidden_level)}.png")
+
+    if gt_datasets is not None and router_config is not None:
+        print(f"Alignment table:\n{alignment_table}")
+        np.save(f"{save_folder}/{save_time}_hl={str(args.hidden_level)}_gt_datasets_alignment_table.npy", alignment_table)
 
 
     # Save clustering models
