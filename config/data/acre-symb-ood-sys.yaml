@@ -1,0 +1,6 @@
+
+dataset_name: "ACRE_SYMB_OOD_SYS"
+dataset_path: "../Logical-and-abstract-reasoning/data/ACRE/symbolic/Sys/test.jsonl"
+evals: true
+dataset_config:
+  max_size: 1000
