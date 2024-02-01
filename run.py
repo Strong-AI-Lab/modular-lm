@@ -148,6 +148,7 @@ def main():
     print(*[f"{metric} : {df[metric].mean()}" for metric in METRICS.keys()], sep="\n")
 
     if df.label.unique().tolist() == [0, 1] or df.label.unique().tolist() == ['0', '1']: # compute binary metrics if binary output
+        df.prediction[(df.prediction!=0) & (df.prediction!=1) & (df.prediction!='0') & (df.prediction!='1')] =  0
         df.label = df.label.map(int)
         df.prediction = df.prediction.map(int)
 
