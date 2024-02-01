@@ -10,7 +10,7 @@ training_arguments:
   per_device_eval_batch_size: 16
   num_train_epochs: 3
   learning_rate: 0.0005
-  report_to: "wandb"
+  report_to: "wandb" # if using deepspeed, change to "none"
   logging_steps: 500
 peft:
   peft_type: "LORA"
