@@ -11,6 +11,12 @@ To install the repository, use the following command:
 git clone https://github.com/Strong-AI-Lab/modular-lm.git
 ```
 
+The data used for the experiments is **not** provided as part of this repository. We use the data from the [Logical-and-abstract-reasoning](https://github.com/Strong-AI-Lab/Logical-and-abstract-reasoning) project. To download the data and use them directly with this repository, use the following command:
+```
+git clone https://github.com/Strong-AI-Lab/Logical-and-abstract-reasoning.git
+```
+Makse sure that the two repositories are in the same folder.
+
 To install the dependencies in a virtual environment, use the following:
 ```
 cd modular-lm
