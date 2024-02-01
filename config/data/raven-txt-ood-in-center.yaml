@@ -1,0 +1,6 @@
+
+dataset_name: "RAVEN_TXT_OOD_IN_CENTER"
+dataset_path: "../Logical-and-abstract-reasoning/data/RAVEN/text/in_center_single_out_center_single.jsonl"
+evals: true
+dataset_config:
+  max_size: 1000

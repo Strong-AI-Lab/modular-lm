@@ -1,0 +1,6 @@
+
+dataset_name: "RAVEN_SYMB_OOD_FOUR"
+dataset_path: "../Logical-and-abstract-reasoning/data/RAVEN/symbolic/distribute_four.jsonl"
+evals: true
+dataset_config:
+  max_size: 1000

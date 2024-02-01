@@ -1,0 +1,9 @@
+dataset_name: "TRAIN_ACRE_RAVEN"
+dataset_path: 
+   - "../Logical-and-abstract-reasoning/data/ACRE/text/IID/train.jsonl"
+   - "../Logical-and-abstract-reasoning/data/ACRE/symbolic/IID/train.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/symbolic/center_single_train.jsonl"
+   - "../Logical-and-abstract-reasoning/data/RAVEN/text/center_single_train.jsonl"
+evals: true
+dataset_config:
+  max_size: 1000
