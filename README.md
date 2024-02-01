@@ -1,6 +1,6 @@
-# Modular LoRA Fine-Tuning for Causal LLMs
+# Independent Causal Language Models
 
-Repository for the Modular-LM project. This repository contains the code for the fine-tuning a Modular-LM model, as well as the code for the clusters visualisation. The Modular-LM model inherits from [Huggingfaces' PreTrainedModel](https://huggingface.co/docs/transformers/main_classes/model) so it and its fine-tuned versions can be used as any other model from the [transformers library](https://huggingface.co/docs/transformers/index).
+Repository for the ICLM project. This repository contains the code for the fine-tuning a modular ICLM model, as well as the code for the clusters visualisation. The ICLM model inherits from [Huggingfaces' PreTrainedModel](https://huggingface.co/docs/transformers/main_classes/model) so it and its fine-tuned versions can be used as any other model from the [transformers library](https://huggingface.co/docs/transformers/index).
 
 
 ## Installation
@@ -51,7 +51,7 @@ The model must be a Modular model and can be loaded like a regular transformers 
 
 ## Clusters Visualisation
 
-The Modular-LM model uses a routing component to direct the input to the different modules. The clusters visualisation allows to visualise the clusters obtained by routing. To compute the clusters, run the following:
+The ICLM model uses a routing component to direct the input to the different modules. The clusters visualisation allows to visualise the clusters obtained by routing. To compute the clusters, run the following:
 ```
 python clustering.py config/model/<model_config>>.yaml config/data/<data_config>.yaml --batch_size <batch_size>
 ```
